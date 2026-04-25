@@ -50,6 +50,9 @@ export default function LoginPage({ onLogin }: { onLogin: () => void }) {
             <div className="text-center mb-8 lg:mb-10">
               <h2 className="text-2xl lg:text-3xl font-black text-text-main tracking-tight">Hoş Geldiniz</h2>
               <p className="text-sm text-text-muted mt-2 font-medium">Devam etmek için giriş yapın.</p>
+              <p className="text-[10px] text-text-muted font-bold uppercase tracking-[0.2em] mt-4 opacity-70">
+                Giriş Bilgileri: <span className="text-primary italic lowercase">admin / admin</span>
+              </p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
@@ -112,6 +115,7 @@ export default function LoginPage({ onLogin }: { onLogin: () => void }) {
                 )}
               </button>
             </form>
+
           </div>
         </motion.div>
       </div>
