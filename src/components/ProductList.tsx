@@ -12,12 +12,14 @@ import {
   Upload,
   Trash2,
   FileText,
+  ScanLine
 } from 'lucide-react';
 import { api, formatCurrency, PLATFORMS } from '../lib/api';
 import { Product } from '../types';
 import Papa from 'papaparse';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import BarcodeScannerModal from './BarcodeScannerModal';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -34,6 +36,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('Hepsi');
   const [filterStatus, setFilterStatus] = useState('Hepsi');
+  const [showScanner, setShowScanner] = useState(false);
 
   useEffect(() => {
     loadProducts();
@@ -346,15 +349,22 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
 
       {/* Filters Bar */}
       <div className="card p-3 lg:p-4 flex flex-col lg:flex-row items-stretch lg:items-center gap-3 lg:gap-4 bg-white shadow-sm">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-text-muted absolute left-3.5 top-3.5 lg:top-3" />
+        <div className="relative flex-1 flex items-center">
+          <Search className="w-4 h-4 text-text-muted absolute left-3.5" />
           <input 
             type="text" 
-            placeholder="Ürün Ara..." 
+            placeholder="Ürün Ara Veya Barkod Okut..." 
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-3 lg:py-2.5 bg-bg-main rounded-xl lg:rounded-lg text-sm border border-border-color focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none"
+            className="w-full pl-10 pr-12 py-3 lg:py-2.5 bg-bg-main rounded-xl lg:rounded-lg text-sm border border-border-color focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none"
           />
+          <button
+            onClick={() => setShowScanner(true)}
+            className="absolute right-2 p-1.5 text-text-muted hover:text-primary transition-colors hover:bg-bg-main rounded-md"
+            title="Kamera ile Barkod Oku"
+          >
+            <ScanLine className="w-5 h-5" />
+          </button>
         </div>
 
         <div className="flex items-center space-x-2 lg:space-x-3">
@@ -570,6 +580,22 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
              </div>
           </div>
         </div>
+      )}
+      
+      {showScanner && (
+        <BarcodeScannerModal
+          onClose={() => setShowScanner(false)}
+          onScan={(barcode) => {
+            const matchedProduct = products.find(p => p.barcode === barcode);
+            if (matchedProduct) {
+              setShowScanner(false);
+              onProductClick(matchedProduct.id);
+            } else {
+               setSearch(barcode);
+               setShowScanner(false);
+            }
+          }}
+        />
       )}
     </div>
   );

@@ -30,6 +30,9 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
   const [saved, setSaved] = useState(false);
 
   const [newCat, setNewCat] = useState({ product: '', income: '', expense: '' });
+  const [restoreProgress, setRestoreProgress] = useState<{ percentage: number; text: string } | null>(null);
+  const [confirmRestoreFile, setConfirmRestoreFile] = useState<File | null>(null);
+  const [confirmInputText, setConfirmInputText] = useState("");
 
   useEffect(() => {
     loadSettings();
@@ -65,7 +68,7 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
     const value = newCat[type].trim();
     if (!value) return;
     
-    const currentList = settings[key] as string[];
+    const currentList = (settings[key] as string[]) || [];
     if (currentList.includes(value)) return;
 
     setSettings({
@@ -78,7 +81,7 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
   const removeCategory = (type: 'product' | 'income' | 'expense', value: string) => {
     if (!settings) return;
     const key = `${type}_categories` as keyof Settings;
-    const currentList = settings[key] as string[];
+    const currentList = (settings[key] as string[]) || [];
     
     setSettings({
       ...settings,
@@ -183,7 +186,7 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
                {/* Product Categories */}
                <CategoryList 
                   title="Ürün Malzemeleri" 
-                  categories={settings.product_categories} 
+                  categories={settings.product_categories || []} 
                   newValue={newCat.product} 
                   onNewValueChange={(v) => setNewCat({...newCat, product: v})}
                   onAdd={() => addCategory('product')}
@@ -193,7 +196,7 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
                {/* Income Categories */}
                <CategoryList 
                   title="Gelirler" 
-                  categories={settings.income_categories} 
+                  categories={settings.income_categories || []} 
                   newValue={newCat.income} 
                   onNewValueChange={(v) => setNewCat({...newCat, income: v})}
                   onAdd={() => addCategory('income')}
@@ -203,7 +206,7 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
                {/* Expense Categories */}
                <CategoryList 
                   title="Giderler" 
-                  categories={settings.expense_categories} 
+                  categories={settings.expense_categories || []} 
                   newValue={newCat.expense} 
                   onNewValueChange={(v) => setNewCat({...newCat, expense: v})}
                   onAdd={() => addCategory('expense')}
@@ -245,16 +248,136 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
          </div>
       </div>
 
-      <div className="p-6 bg-red-50/50 border border-red-100 rounded-2xl flex items-center justify-between">
-         <div className="flex items-center">
-           <AlertCircle className="w-5 h-5 text-danger mr-4" />
+      <div className="p-6 bg-red-50/50 border border-red-100 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+         <div className="flex items-start md:items-center">
+           <AlertCircle className="w-5 h-5 text-danger mr-4 mt-1 md:mt-0" />
            <div>
-              <h4 className="text-sm font-bold text-danger uppercase tracking-tight">Veritabanı Bakımı</h4>
-              <p className="text-xs text-text-muted mt-0.5">Sistem verileri yerel SQLite dosyasında saklanmaktadır.</p>
+              <h4 className="text-sm font-bold text-danger uppercase tracking-tight">Veritabanı Bakımı & Yedekleme</h4>
+              <p className="text-xs text-text-muted mt-0.5">Olası çökme ve veri kayıplarına karşı yedek alabilirsiniz. Aldığınız yedeği "Geri Yükle" ile tekrar sisteme aktarabilirsiniz (Bu işlem mevcut verileri siler).</p>
            </div>
          </div>
-         <button className="px-5 py-2 bg-white border border-red-200 text-danger rounded-xl text-[11px] font-bold uppercase tracking-widest hover:bg-danger hover:text-white transition-all shadow-sm active:scale-95">Yedek Al</button>
+         <div className="flex items-center gap-3 w-full md:w-auto">
+           <label className="px-5 py-2 cursor-pointer bg-white border border-red-200 text-danger rounded-xl text-[11px] font-bold uppercase tracking-widest hover:bg-danger/10 transition-all shadow-sm active:scale-95 text-center flex-1 md:flex-none">
+             Geri Yükle
+             <input type="file" accept=".zip" className="hidden" onClick={(e) => (e.target as HTMLInputElement).value = ''} onChange={(e) => {
+               const file = e.target.files?.[0];
+               if (!file) return;
+               
+               setConfirmRestoreFile(file);
+             }} />
+           </label>
+           <button 
+             onClick={() => {
+               window.location.href = '/api/backup/download';
+             }}
+             className="px-5 py-2 bg-danger border border-transparent text-white rounded-xl text-[11px] font-bold uppercase tracking-widest hover:bg-red-700 transition-all shadow-sm active:scale-95 text-center flex-1 md:flex-none"
+           >
+             Yedek İndir
+           </button>
+         </div>
       </div>
+
+      {confirmRestoreFile && (
+        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+           <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl">
+               <AlertCircle className="w-12 h-12 text-danger mx-auto mb-4" />
+               <h3 className="text-xl font-black text-danger mb-2">DİKKAT</h3>
+               <p className="text-sm font-medium text-text-muted mb-6">Mevcut sisteminizdeki tüm veriler (ürünler, satışlar, loglar) silinip yerine yüklediğiniz yedek dosyası geçecek. Bu işlem <span className="font-bold text-danger">Geri Alınamaz!</span></p>
+               <p className="text-xs font-bold text-text-main mb-3">Onaylamak için büyük harflerle "ONAY" yazın:</p>
+               <input 
+                  type="text" 
+                  autoFocus
+                  className="form-input text-center font-black tracking-widest text-lg mb-6"
+                  value={confirmInputText}
+                  onChange={(e) => setConfirmInputText(e.target.value)}
+                  placeholder="ONAY"
+               />
+               <div className="flex gap-3">
+                 <button 
+                   className="flex-1 bg-gray-100 text-text-main py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors"
+                   onClick={() => {
+                     setConfirmRestoreFile(null);
+                     setConfirmInputText("");
+                   }}
+                 >
+                   İptal
+                 </button>
+                 <button 
+                   className="flex-1 bg-danger text-white py-3 rounded-xl font-bold hover:bg-red-700 transition-colors disabled:opacity-50"
+                   disabled={confirmInputText !== "ONAY"}
+                   onClick={() => {
+                     const file = confirmRestoreFile;
+                     setConfirmRestoreFile(null);
+                     setConfirmInputText("");
+                     
+                     if (!file) return;
+
+                     const formData = new FormData();
+                     formData.append("zipfile", file);
+                     
+                     setRestoreProgress({ percentage: 0, text: "Yükleniyor... %0" });
+                     
+                     const xhr = new XMLHttpRequest();
+                     xhr.open("POST", "/api/backup/restore", true);
+                     
+                     xhr.upload.onprogress = (event) => {
+                       if (event.lengthComputable) {
+                         const percent = Math.round((event.loaded / event.total) * 90);
+                         setRestoreProgress({ percentage: percent, text: `Yükleniyor... %${percent}` });
+                       }
+                     };
+                     
+                     xhr.onload = () => {
+                       if (xhr.status >= 200 && xhr.status < 300) {
+                         setRestoreProgress({ percentage: 100, text: "Dosyalar çıkarılıyor ve geri yükleme tamamlanıyor..." });
+                         setTimeout(() => {
+                           alert("Sistem başarıyla yeni yedeğe geçirildi. Uygulama yeniden yüklenecek.");
+                           window.location.reload();
+                         }, 1000);
+                       } else {
+                         let errMsg = "Geri yükleme başarısız.";
+                         try {
+                           const err = JSON.parse(xhr.responseText);
+                           if (err.error) errMsg = err.error;
+                         } catch(e) {}
+                         alert(errMsg);
+                         setRestoreProgress(null);
+                       }
+                     };
+                     
+                     xhr.onerror = () => {
+                       alert("Yükleme sırasında ağ hatası oluştu.");
+                       setRestoreProgress(null);
+                     };
+                     
+                     xhr.send(formData);
+                   }}
+                 >
+                   Onaylıyorum
+                 </button>
+               </div>
+           </div>
+        </div>
+      )}
+
+      {restoreProgress && (
+        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+           <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl">
+               <AlertCircle className="w-12 h-12 text-primary mx-auto mb-4 animate-pulse" />
+               <h3 className="text-xl font-black text-text-main mb-2">Sistem Geri Yükleniyor</h3>
+               <p className="text-sm font-medium text-text-muted mb-6">{restoreProgress.text}</p>
+               <div className="w-full bg-gray-100 rounded-full h-3 mb-2 overflow-hidden">
+                   <div 
+                     className="bg-primary h-3 rounded-full transition-all duration-300 ease-out"
+                     style={{ width: `${restoreProgress.percentage}%` }}
+                   ></div>
+               </div>
+               <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest mt-4">
+                 Lütfen sekmeyi kapatmayın...
+               </p>
+           </div>
+        </div>
+      )}
     </div>
   );
 }

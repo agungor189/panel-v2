@@ -6,9 +6,11 @@ import fs from "fs";
 import Database from "better-sqlite3";
 import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
+import os from "os";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import AdmZip from "adm-zip";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,7 +22,7 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 // Database initialization
-const db = new Database("dsdst_panel.db");
+let db = new Database("dsdst_panel.db");
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
@@ -254,6 +256,7 @@ const storage = multer.diskStorage({
   }
 });
 const upload = multer({ storage });
+const backupUpload = multer({ dest: os.tmpdir() });
 
 function logActivity(action: string, entity_type: string, entity_id: string, details?: any) {
   try {
@@ -909,6 +912,92 @@ async function startServer() {
       res.json({ id });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- DATABASE BACKUP / RESTORE ---
+  app.get("/api/backup/download", async (req, res) => {
+    try {
+      const backupPath = path.join(process.cwd(), `dsdst_backup_${Date.now()}.sqlite`);
+      await db.backup(backupPath);
+      
+      const zip = new AdmZip();
+      zip.addLocalFile(backupPath, "", "dsdst_panel.db");
+      
+      const uploadsDir = path.join(process.cwd(), "uploads");
+      if (fs.existsSync(uploadsDir)) {
+         zip.addLocalFolder(uploadsDir, "uploads");
+      }
+      
+      const zipPath = path.join(process.cwd(), `kofem_backup_${Date.now()}.zip`);
+      zip.writeZip(zipPath);
+
+      res.download(zipPath, `kofem_backup_${new Date().toISOString().split('T')[0]}.zip`, (err) => {
+        try { fs.unlinkSync(backupPath); } catch(e) {}
+        try { fs.unlinkSync(zipPath); } catch(e) {}
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: "Backup failed: " + err.message });
+    }
+  });
+
+  app.post("/api/backup/restore", backupUpload.single("zipfile"), (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+      
+      const newPath = req.file.path;
+      
+      const zip = new AdmZip(newPath);
+      const zipEntries = zip.getEntries();
+      
+      const dbEntry = zipEntries.find(e => e.entryName === "dsdst_panel.db");
+      if (!dbEntry) {
+         try { fs.unlinkSync(newPath); } catch(e) {}
+         return res.status(400).json({ error: "Geçersiz yedek dosyası: dsdst_panel.db bulunamadı" });
+      }
+
+      // Close the current DB
+      db.close();
+
+      // Delete the old DB files completely before extraction to ensure no inode conflicts
+      try { fs.unlinkSync(path.join(process.cwd(), "dsdst_panel.db")); } catch(e) {}
+      try { fs.unlinkSync(path.join(process.cwd(), "dsdst_panel.db-wal")); } catch(e) {}
+      try { fs.unlinkSync(path.join(process.cwd(), "dsdst_panel.db-shm")); } catch(e) {}
+
+      // Extract all contents (overwrite existing)
+      zip.extractAllTo(process.cwd(), true);
+
+      // Attempt cleanup of the uploaded temp file
+      try { fs.unlinkSync(newPath); } catch(e) {}
+
+      // Re-instantiate the database
+      db = new Database("dsdst_panel.db");
+      db.pragma("journal_mode = WAL");
+      db.pragma("foreign_keys = ON");
+      
+      // Ensure missing default settings are populated from older backups (e.g., product_categories)
+      const postRestoreInsertSetting = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
+      postRestoreInsertSetting.run("company_name", "DSDST Panel");
+      postRestoreInsertSetting.run("low_stock_threshold", "50");
+      postRestoreInsertSetting.run("currency_symbol", "₺");
+      postRestoreInsertSetting.run("language", "tr");
+      postRestoreInsertSetting.run("usd_exchange_rate", "32.5");
+      postRestoreInsertSetting.run("default_buffer_percentage", "20");
+      postRestoreInsertSetting.run("commission_rates", JSON.stringify({
+        "Trendyol": 15, "Hepsiburada": 15, "Amazon": 10, "N11": 15, "Website": 2, "Instagram": 0
+      }));
+      postRestoreInsertSetting.run("product_categories", JSON.stringify(["Aliminyum", "PPR", "Dokum Demir", "Karbon Celik"]));
+      postRestoreInsertSetting.run("income_categories", JSON.stringify(["Satış", "İade", "Hizmet Bedeli", "Diğer"]));
+      postRestoreInsertSetting.run("expense_categories", JSON.stringify(["Kargo", "Komisyon", "Maliyet", "Reklam", "Vergi", "Diğer"]));
+
+      // We cannot log safely if the schema changed but basically assume success
+      logActivity("DB_RESTORED", "system", "system", { info: "Database restored from backup" });
+
+      res.json({ success: true, message: "Sistem başarıyla yeni veritabanına ve görsel yedeğine geçirildi." });
+    } catch (err: any) {
+      res.status(500).json({ error: "Restore failed: " + err.message });
     }
   });
 
