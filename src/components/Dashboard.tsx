@@ -66,10 +66,8 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
       setMetrics(metricsData);
       setChartData(chartsData);
       
-      const threshold = parseInt(settings.low_stock_threshold);
-      // This is a simplified check for the dashboard
-      const low = allProducts.filter((p: any) => p.total_stock <= threshold && p.status === 'Active');
-      setLowStockProducts(low);
+      const lowStockProductsList = metricsData.lowStockProducts || [];
+      setLowStockProducts(lowStockProductsList);
       setRecentTransactions(transactions.slice(0, 10));
     } catch (err) {
       console.error("Dashboard load error", err);

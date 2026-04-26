@@ -45,8 +45,8 @@ export const formatCurrency = (value: number, symbol = "₺") => {
   return new Intl.NumberFormat("tr-TR", {
     style: "currency",
     currency: "TRY",
-    currencyDisplay: "narrowSymbol"
-  }).format(value).replace("TL", symbol);
+    currencyDisplay: "symbol"
+  }).format(value).replace("TL", symbol).replace("₺", symbol);
 };
 
 export const PLATFORMS = ["Trendyol", "Hepsiburada", "Amazon", "N11", "Website", "Instagram"];

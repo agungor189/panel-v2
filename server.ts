@@ -139,7 +139,8 @@ try {
 // Default settings
 const insertSetting = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
 insertSetting.run("company_name", "DSDST Panel");
-insertSetting.run("low_stock_threshold", "5");
+insertSetting.run("low_stock_threshold", "50");
+db.prepare("UPDATE settings SET value = '50' WHERE key = 'low_stock_threshold'").run(); // force update from user request
 insertSetting.run("currency_symbol", "₺");
 insertSetting.run("language", "tr");
 insertSetting.run("usd_exchange_rate", "32.5");
@@ -202,18 +203,22 @@ async function startServer() {
     const totalRevenue = revenueResult?.total || 0;
     const totalExpenses = (realizedExpensesResult?.total || 0) + pendingRecurringTotal;
 
-    const lowStock = db.prepare(`
-      SELECT COUNT(*) as count 
+    const lowStockProductsQuery = db.prepare(`
+      SELECT p.*,
+        (SELECT path FROM product_images WHERE product_id = p.id ORDER BY sort_order ASC LIMIT 1) as cover_image,
+        COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) as total_stock
       FROM products p
-      WHERE (SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id) <= (SELECT value FROM settings WHERE key = 'low_stock_threshold')
+      WHERE COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) < CAST((SELECT value FROM settings WHERE key = 'low_stock_threshold') AS INTEGER)
       AND p.status = 'Active'
-    `).get() as any;
+      ORDER BY total_stock ASC
+    `).all() as any[];
 
     res.json({
       totalRevenue,
       totalExpenses,
       netProfit: totalRevenue - totalExpenses,
-      lowStockCount: lowStock?.count || 0
+      lowStockCount: lowStockProductsQuery.length,
+      lowStockProducts: lowStockProductsQuery
     });
   });
 
@@ -282,7 +287,7 @@ async function startServer() {
     const products = db.prepare(`
       SELECT p.*, 
         (SELECT path FROM product_images WHERE product_id = p.id ORDER BY sort_order ASC LIMIT 1) as cover_image,
-        (SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id) as total_stock
+        COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) as total_stock
       FROM products p
       ORDER BY p.created_at DESC
     `).all();

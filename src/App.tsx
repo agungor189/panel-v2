@@ -41,14 +41,22 @@ export default function App() {
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
-    const saved = localStorage.getItem('isSidebarOpen');
-    if (saved !== null) return saved === 'true';
+    try {
+      const saved = localStorage.getItem('isSidebarOpen');
+      if (saved !== null) return saved === 'true';
+    } catch {
+      // ignore
+    }
     return window.innerWidth > 768;
   });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem('isSidebarOpen', String(isSidebarOpen));
+    try {
+      localStorage.setItem('isSidebarOpen', String(isSidebarOpen));
+    } catch {
+      // ignore
+    }
   }, [isSidebarOpen]);
 
   useEffect(() => {
@@ -63,7 +71,12 @@ export default function App() {
 
   useEffect(() => {
     // Check initial auth state
-    const auth = localStorage.getItem('isAuthenticated') === 'true';
+    let auth = false;
+    try {
+      auth = localStorage.getItem('isAuthenticated') === 'true';
+    } catch {
+      // ignore
+    }
     setIsAuthenticated(auth);
     
     if (auth) {
@@ -86,7 +99,11 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('isAuthenticated');
+    try {
+      localStorage.removeItem('isAuthenticated');
+    } catch {
+      // ignore
+    }
     setIsAuthenticated(false);
   };
 

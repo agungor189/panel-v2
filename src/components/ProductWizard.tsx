@@ -29,6 +29,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
   const [formData, setFormData] = useState<any>({
     name: '',
     title: '',
+    total_stock: '',
     warehouse_location: '',
     sku: '',
     barcode: '',
@@ -70,8 +71,10 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
   const loadProduct = async () => {
     try {
       const data = await api.get(`/products/${productId}`);
+      const totalStock = data.platforms?.reduce((acc: number, p: any) => acc + (p.stock || 0), 0) || 0;
       setFormData({
         ...data,
+        total_stock: totalStock,
         platforms: PLATFORMS.map(name => {
           const p = data.platforms.find((dp: any) => dp.platform_name === name);
           return p ? { name, stock: p.stock, price: p.price, is_listed: !!p.is_listed } : { name, stock: 0, price: data.sale_price, is_listed: false };
@@ -85,7 +88,14 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
 
   const handleInputChange = (e: any) => {
     const { name, value } = e.target;
-    setFormData((prev: any) => ({ ...prev, [name]: value }));
+    setFormData((prev: any) => {
+      const next = { ...prev, [name]: value };
+      if (name === 'total_stock' && value !== '') {
+        const val = parseInt(value) || 0;
+        next.platforms = next.platforms.map((p: any) => ({ ...p, stock: val }));
+      }
+      return next;
+    });
   };
 
   const handlePlatformChange = (index: number, field: string, value: any) => {
@@ -115,8 +125,8 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
   };
 
   const handleSubmit = async () => {
-    if (!formData.name || !formData.title) {
-       alert("Lütfen zorunlu alanları (Ad ve Başlık) doldurunuz.");
+    if (!formData.name || !formData.title || formData.total_stock === '' || formData.total_stock === null || formData.total_stock === undefined) {
+       alert("Lütfen zorunlu alanları (Ad, Başlık, Stok) doldurunuz.");
        return;
     }
     setLoading(true);
@@ -231,6 +241,16 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
                   value={formData.weight} 
                   onChange={handleInputChange} 
                   placeholder="Örn: 250"
+                  className="form-input font-bold" 
+                />
+              </Field>
+              <Field label="Stok Adeti" required>
+                <input 
+                  type="number"
+                  name="total_stock" 
+                  value={formData.total_stock} 
+                  onChange={handleInputChange} 
+                  placeholder="Örn: 100"
                   className="form-input font-bold" 
                 />
               </Field>

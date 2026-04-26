@@ -15,7 +15,11 @@ export default function LoginPage({ onLogin }: { onLogin: () => void }) {
     // Simulate brief network delay for better UI feel
     setTimeout(() => {
       if (username === 'admin' && password === 'admin') {
-        localStorage.setItem('isAuthenticated', 'true');
+        try {
+          localStorage.setItem('isAuthenticated', 'true');
+        } catch {
+          // ignore
+        }
         onLogin();
       } else {
         setError('Geçersiz kullanıcı adı veya şifre.');

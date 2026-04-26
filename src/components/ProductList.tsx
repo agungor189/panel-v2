@@ -179,7 +179,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
           sale_price: salePrice,
           buffer_percentage: 0,
           exchange_rate_used: 0,
-          status: 'Active',
+          status: totalStock > 0 ? 'Active' : 'Out of stock',
           platforms: PLATFORMS.map((pName, idx) => ({
             name: pName,
             stock: idx === 0 ? totalStock : 0,
