@@ -8,8 +8,12 @@ export interface Product {
   category: string;
   model: string;
   description: string;
+  purchase_price_usd: number;
   purchase_cost: number;
   sale_price: number;
+  buffer_percentage: number;
+  exchange_rate_used: number;
+  weight: number;
   status: 'Active' | 'Passive' | 'Out of stock';
   notes: string;
   created_at: string;
@@ -72,6 +76,8 @@ export interface Settings {
   low_stock_threshold: number;
   currency_symbol: string;
   language: string;
+  usd_exchange_rate: number;
+  default_buffer_percentage: number;
   commission_rates: Record<string, number>;
   product_categories: string[];
   income_categories: string[];

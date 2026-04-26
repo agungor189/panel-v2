@@ -35,6 +35,8 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
   const [stockLogs, setStockLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
   useEffect(() => {
     loadData();
   }, [productId]);
@@ -64,18 +66,19 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
        });
        loadData();
     } catch (err) {
-       alert("Stok güncellenemedi");
+       console.error("Stok güncellenemedi", err);
     }
   };
 
   const deleteProduct = async () => {
-    if (confirm("Bu ürünü silmek istediğinize emin misiniz? Bu işlem geri alınamaz.")) {
-      try {
-        await api.delete(`/products/${productId}`);
-        onBack();
-      } catch (err) {
-        alert("Silme işlemi başarısız.");
-      }
+    try {
+      setLoading(true);
+      await api.delete(`/products/${productId}`);
+      onBack();
+    } catch (err) {
+      console.error("Silme işlemi başarısız.", err);
+      setLoading(false);
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -108,12 +111,32 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
                <Edit3 className="w-4 h-4 mr-2" />
                Düzenle
              </button>
-             <button 
-               onClick={deleteProduct}
-               className="p-2.5 border border-[#E2E8F0] text-rose-500 rounded-xl hover:bg-rose-50 transition-colors"
-             >
-               <Trash2 className="w-4 h-4" />
-             </button>
+             
+             {!showDeleteConfirm ? (
+               <button 
+                 onClick={() => setShowDeleteConfirm(true)}
+                 className="p-2.5 border border-[#E2E8F0] text-rose-500 rounded-xl hover:bg-rose-50 transition-colors"
+                 title="Ürünü Sil"
+               >
+                 <Trash2 className="w-4 h-4" />
+               </button>
+             ) : (
+               <div className="flex items-center space-x-2 animate-in fade-in zoom-in duration-200">
+                 <span className="text-[10px] font-bold text-rose-500 uppercase tracking-tight hidden sm:block">Silinsin mi?</span>
+                 <button 
+                   onClick={deleteProduct}
+                   className="px-3 py-2 bg-rose-500 text-white rounded-lg font-bold text-xs hover:bg-rose-600 transition-colors shadow-sm"
+                 >
+                   Evet, Sil
+                 </button>
+                 <button 
+                   onClick={() => setShowDeleteConfirm(false)}
+                   className="px-3 py-2 bg-bg-main border border-border-color text-text-muted rounded-lg font-bold text-xs hover:bg-white transition-colors"
+                 >
+                   Vazgeç
+                 </button>
+               </div>
+             )}
          </div>
       </div>
 
@@ -122,7 +145,7 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
         <div className="lg:col-span-1 space-y-4">
            <div className="aspect-square bg-white border border-border-color rounded-2xl overflow-hidden shadow-sm relative p-8">
               {activeImage ? (
-                <img src={activeImage} className="w-full h-full object-contain" />
+                <img src={activeImage} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center bg-bg-main">
                    <Package className="w-16 h-16 text-border-color" />
@@ -147,7 +170,7 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
                     activeImage === img.path ? "border-primary" : "border-border-color opacity-60 hover:opacity-100"
                   )}
                 >
-                  <img src={img.path} className="w-full h-full object-contain" />
+                  <img src={img.path} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                 </button>
               ))}
            </div>
@@ -177,21 +200,31 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 py-6 border-y border-border-color">
-                <DetailStat label="Satış Fiyatı" value={formatCurrency(product.sale_price)} color="text-text-main" />
-                <DetailStat label="Maliyet" value={formatCurrency(product.purchase_cost)} color="text-text-muted" />
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-6 py-6 border-y border-border-color">
+                <DetailStat label="Satış Fiyatı" value={formatCurrency(product.sale_price)} color="text-primary font-black" />
+                <DetailStat label="Ağırlık" value={`${product.weight} gr`} color="text-text-muted" />
+                <DetailStat label="Alış ($)" value={`$${product.purchase_price_usd.toFixed(2)}`} color="text-text-muted" subLabel={`₺${product.exchange_rate_used} kur ile`} />
+                <DetailStat label="Maliyet (₺)" value={formatCurrency(product.purchase_cost)} color="text-text-muted" />
                 <DetailStat 
-                  label="Kar Payı" 
+                  label="Kar / Buffer" 
                   value={formatCurrency(profit)} 
-                  subLabel={`%${margin} Marj`} 
+                  subLabel={`%${product.buffer_percentage} Buffer`} 
                   color="text-success" 
                 />
               </div>
-
-              <div className="space-y-3">
-                <h3 className="text-xs font-bold text-text-muted uppercase tracking-widest flex items-center"><Info className="w-4 h-4 mr-2" /> Ürün Açıklaması</h3>
-                <div className="text-sm text-text-muted leading-relaxed whitespace-pre-wrap bg-bg-main p-4 rounded-lg border border-border-color">
-                  {product.description || 'Açıklama girilmemiş.'}
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-6">
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold text-text-muted uppercase tracking-widest flex items-center"><Info className="w-4 h-4 mr-2" /> Ürün Açıklaması</h3>
+                  <div className="text-sm text-text-muted leading-relaxed whitespace-pre-wrap bg-bg-main p-4 rounded-lg border border-border-color">
+                    {product.description || 'Açıklama girilmemiş.'}
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold text-text-muted uppercase tracking-widest flex items-center"><MessageSquare className="w-4 h-4 mr-2" /> Dahili Notlar</h3>
+                  <div className="text-sm text-text-muted leading-relaxed whitespace-pre-wrap bg-bg-main p-4 rounded-lg border border-border-color italic">
+                    {product.notes || 'Not eklenmemiş.'}
+                  </div>
                 </div>
               </div>
            </section>

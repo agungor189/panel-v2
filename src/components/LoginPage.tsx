@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Lock, User, LogIn, ShieldCheck, Zap, BarChart3, Globe } from 'lucide-react';
 

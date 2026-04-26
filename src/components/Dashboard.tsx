@@ -49,6 +49,7 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
   const [chartData, setChartData] = useState<any>(null);
   const [lowStockProducts, setLowStockProducts] = useState<Product[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
+  const [showLowStockModal, setShowLowStockModal] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -68,7 +69,7 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
       const threshold = parseInt(settings.low_stock_threshold);
       // This is a simplified check for the dashboard
       const low = allProducts.filter((p: any) => p.total_stock <= threshold && p.status === 'Active');
-      setLowStockProducts(low.slice(0, 5));
+      setLowStockProducts(low);
       setRecentTransactions(transactions.slice(0, 10));
     } catch (err) {
       console.error("Dashboard load error", err);
@@ -157,7 +158,7 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
           positive={false}
           color="text-danger"
           bg="bg-orange-50"
-          onClick={() => onNavigate('products')}
+          onClick={() => setShowLowStockModal(true)}
         />
       </div>
 
@@ -233,7 +234,7 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
             <h3 className="font-semibold text-text-main">Kritik Stok Uyarıları</h3>
           </div>
           <div className="p-2 space-y-1">
-             {lowStockProducts.map((p) => (
+             {lowStockProducts.slice(0, 5).map((p) => (
                <div 
                  key={p.id} 
                  onClick={() => onProductClick(p.id)}
@@ -258,6 +259,14 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
                  </div>
                </div>
              ))}
+             {lowStockProducts.length > 5 && (
+               <button 
+                 onClick={() => setShowLowStockModal(true)}
+                 className="w-full text-center py-3 text-xs font-bold text-primary hover:bg-bg-main rounded-lg transition-colors border border-dashed border-border-color mt-2"
+               >
+                 Tüm {lowStockProducts.length} Ürünü Gör
+               </button>
+             )}
              {lowStockProducts.length === 0 && (
                <div className="py-12 text-center">
                  <Package className="w-10 h-10 text-border-color mx-auto mb-3" />
@@ -267,6 +276,60 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
           </div>
         </div>
       </div>
+
+      {showLowStockModal && (
+        <div className="fixed inset-0 bg-[#0F172A]/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in duration-300 flex flex-col max-h-[85vh]">
+            <div className="p-6 border-b border-border-color bg-gray-50 flex items-center justify-between shrink-0">
+               <div>
+                  <h3 className="text-xl font-black text-[#0F172A] tracking-tight">Kritik Stoktaki Ürünler</h3>
+                  <p className="text-sm text-text-muted mt-1">Stok seviyesi kritik olan tüm ürünler ({lowStockProducts.length} adet)</p>
+               </div>
+               <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center border border-border-color shadow-sm text-danger">
+                  <AlertTriangle className="w-6 h-6" />
+               </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2">
+              {lowStockProducts.map((p) => (
+                <div 
+                  key={p.id} 
+                  onClick={() => {
+                    setShowLowStockModal(false);
+                    onProductClick(p.id);
+                  }}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between p-4 hover:bg-bg-main rounded-xl border border-border-color cursor-pointer transition-all group gap-4"
+                >
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-12 bg-white rounded-lg flex items-center justify-center overflow-hidden border border-border-color shrink-0">
+                       {p.cover_image ? (
+                         <img src={p.cover_image} className="w-full h-full object-cover" />
+                       ) : (
+                         <Package className="w-6 h-6 text-text-muted" />
+                       )}
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-text-main group-hover:text-primary transition-colors">{p.title}</p>
+                      <p className="text-[11px] text-text-muted font-mono mt-0.5">{p.sku}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center sm:block sm:text-right w-full sm:w-auto mt-2 sm:mt-0 pt-2 sm:pt-0 border-t border-border-color sm:border-0 justify-between">
+                     <p className="text-sm font-black text-danger">{p.total_stock} Adet</p>
+                     <p className="text-[10px] text-text-muted uppercase font-bold tracking-tight bg-orange-100 text-orange-700 px-2 py-0.5 rounded ml-2 sm:ml-0 sm:mt-1 inline-block">Acil Sipariş</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="p-6 bg-gray-50 border-t border-border-color shrink-0 text-right">
+               <button 
+                 onClick={() => setShowLowStockModal(false)}
+                 className="px-8 h-12 bg-[#0F172A] text-white rounded-xl font-bold text-sm shadow-xl hover:scale-105 transition-all"
+               >
+                 Kapat
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

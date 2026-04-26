@@ -142,6 +142,33 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
                     />
                  </div>
                </div>
+               <div className="grid grid-cols-2 gap-6">
+                 <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-text-muted uppercase tracking-widest px-1">USD Kuru ($ → ₺)</label>
+                    <div className="relative">
+                      <div className="absolute left-4 top-3 text-text-muted font-bold text-sm">₺</div>
+                      <input 
+                        type="number" 
+                        step="0.01"
+                        value={settings.usd_exchange_rate} 
+                        onChange={e => setSettings({...settings, usd_exchange_rate: parseFloat(e.target.value)})}
+                        className="form-input font-bold pl-10"
+                      />
+                    </div>
+                 </div>
+                 <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-text-muted uppercase tracking-widest px-1">Varsayılan Buffer (%)</label>
+                    <div className="relative">
+                      <div className="absolute right-4 top-3 text-text-muted font-bold text-sm">%</div>
+                      <input 
+                        type="number" 
+                        value={settings.default_buffer_percentage} 
+                        onChange={e => setSettings({...settings, default_buffer_percentage: parseInt(e.target.value)})}
+                        className="form-input font-bold pr-10"
+                      />
+                    </div>
+                 </div>
+               </div>
             </div>
          </div>
 
@@ -149,13 +176,13 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
          <div className="p-8 space-y-6">
             <h3 className="text-xs font-bold text-text-muted uppercase tracking-widest flex items-center">
                <ListFilter className="w-4 h-4 mr-3 text-primary" />
-               Kategori Yönetimi
+               Malzeme & Kategori Yönetimi
             </h3>
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                {/* Product Categories */}
                <CategoryList 
-                  title="Ürünler" 
+                  title="Ürün Malzemeleri" 
                   categories={settings.product_categories} 
                   newValue={newCat.product} 
                   onNewValueChange={(v) => setNewCat({...newCat, product: v})}

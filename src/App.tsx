@@ -40,15 +40,21 @@ export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    const saved = localStorage.getItem('isSidebarOpen');
+    if (saved !== null) return saved === 'true';
+    return window.innerWidth > 768;
+  });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
+    localStorage.setItem('isSidebarOpen', String(isSidebarOpen));
+  }, [isSidebarOpen]);
+
+  useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth <= 1024) {
+      if (window.innerWidth <= 768) {
         setIsSidebarOpen(false);
-      } else {
-        setIsSidebarOpen(true);
       }
     };
     window.addEventListener('resize', handleResize);
@@ -112,8 +118,8 @@ export default function App() {
       <aside className={cn(
         "fixed left-0 top-0 h-full border-r border-border-color bg-sidebar-bg text-white transition-all duration-300 z-50",
         isSidebarOpen ? "w-64" : "w-20",
-        "lg:translate-x-0",
-        isMobileMenuOpen ? "translate-x-0 w-64" : "-translate-x-full lg:translate-x-0"
+        "md:translate-x-0",
+        isMobileMenuOpen ? "translate-x-0 w-64" : "-translate-x-full md:translate-x-0"
       )}>
         <div className="flex h-16 items-center px-6 border-b border-white/10 shrink-0">
           {(isSidebarOpen || isMobileMenuOpen) ? (
@@ -123,7 +129,7 @@ export default function App() {
               </h1>
               <button 
                 onClick={() => setIsMobileMenuOpen(false)}
-                className="lg:hidden p-1 text-white/50 hover:text-white"
+                className="md:hidden p-1 text-white/50 hover:text-white"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -168,7 +174,7 @@ export default function App() {
 
         <button 
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          className="hidden lg:flex absolute bottom-4 right-[-12px] w-6 h-6 bg-white border border-border-color text-sidebar-bg rounded-full items-center justify-center hover:bg-bg-main shadow-md cursor-pointer transition-transform"
+          className="hidden md:flex absolute bottom-4 right-[-12px] w-6 h-6 bg-white border border-border-color text-sidebar-bg rounded-full items-center justify-center hover:bg-bg-main shadow-md cursor-pointer transition-transform"
         >
           <ChevronRight className={cn("w-3.5 h-3.5 transition-transform", isSidebarOpen && "rotate-180")} />
         </button>
@@ -177,7 +183,7 @@ export default function App() {
       {/* Overlay for mobile */}
       {isMobileMenuOpen && (
         <div 
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
           onClick={() => setIsMobileMenuOpen(false)}
         />
       )}
@@ -185,35 +191,35 @@ export default function App() {
       {/* Main Content */}
       <main className={cn(
         "transition-all duration-300 min-h-screen flex flex-col w-full",
-        isSidebarOpen ? "lg:pl-64" : "lg:pl-20"
+        isSidebarOpen ? "md:pl-64" : "md:pl-20"
       )}>
         {/* Header */}
-        <header className="h-16 bg-white border-b border-border-color flex items-center justify-between px-4 lg:px-8 sticky top-0 z-40">
-          <div className="flex items-center space-x-4 lg:space-x-6">
+        <header className="h-16 bg-white border-b border-border-color flex items-center justify-between px-4 md:px-8 sticky top-0 z-40">
+          <div className="flex items-center space-x-4 md:space-x-6">
              <button 
                onClick={() => setIsMobileMenuOpen(true)}
-               className="lg:hidden p-2 text-text-muted hover:text-primary transition-colors"
+               className="md:hidden p-2 text-text-muted hover:text-primary transition-colors"
              >
                 <Menu className="w-6 h-6" />
              </button>
-             <h2 className="text-base lg:text-lg font-semibold text-text-main truncate">
+             <h2 className="text-base md:text-lg font-semibold text-text-main truncate">
                 {navItems.find(i => i.id === currentView)?.label || 'Ürün Detayı'}
              </h2>
           </div>
 
-          <div className="flex items-center space-x-2 lg:space-x-6">
-            <div className="relative hidden md:block">
-              <input 
-                type="text" 
-                placeholder="Ürün Ara..." 
-                className="pl-9 pr-4 py-1.5 bg-bg-main border border-border-color rounded-lg text-sm w-40 lg:w-60 focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none"
-              />
-              <Search className="w-4 h-4 text-text-muted absolute left-3 top-2" />
-            </div>
-            <button className="p-2 text-text-muted hover:text-primary transition-colors">
-              <Bell className="w-5 h-5" />
-            </button>
-            <div className="flex items-center space-x-2 lg:space-x-3 border-l border-border-color pl-2 lg:pl-6">
+          <div className="flex items-center space-x-2 md:space-x-6">
+             <div className="relative hidden md:block">
+               <input 
+                 type="text" 
+                 placeholder="Ürün Ara..." 
+                 className="pl-9 pr-4 py-1.5 bg-bg-main border border-border-color rounded-lg text-sm w-40 md:w-60 focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none"
+               />
+               <Search className="w-4 h-4 text-text-muted absolute left-3 top-2" />
+             </div>
+             <button className="p-2 text-text-muted hover:text-primary transition-colors">
+               <Bell className="w-5 h-5" />
+             </button>
+             <div className="flex items-center space-x-2 md:space-x-3 border-l border-border-color pl-2 md:pl-6">
               <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-[10px] font-bold shrink-0">AL</div>
               <span className="text-sm font-semibold text-text-main hidden sm:inline">Yönetici</span>
             </div>
@@ -221,7 +227,7 @@ export default function App() {
         </header>
 
         {/* View Container */}
-        <div className="p-4 lg:p-6 flex-1 max-w-[1600px] w-full mx-auto">
+        <div className="p-4 md:p-6 flex-1 max-w-[1600px] w-full mx-auto">
           {currentView === 'dashboard' && <Dashboard onNavigate={setCurrentView} onProductClick={navigateToProduct} />}
           {currentView === 'products' && (
             <ProductList 

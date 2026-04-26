@@ -20,6 +20,7 @@ if (!fs.existsSync(uploadsDir)) {
 // Database initialization
 const db = new Database("dsdst_panel.db");
 db.pragma("journal_mode = WAL");
+db.pragma("foreign_keys = ON");
 
 // Schema setup
 db.exec(`
@@ -33,9 +34,13 @@ db.exec(`
     category TEXT,
     model TEXT,
     description TEXT,
+    purchase_price_usd REAL DEFAULT 0,
     purchase_cost REAL DEFAULT 0,
     sale_price REAL DEFAULT 0,
+    buffer_percentage REAL DEFAULT 0,
+    exchange_rate_used REAL DEFAULT 0,
     status TEXT DEFAULT 'Active',
+    weight REAL DEFAULT 0,
     notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -55,10 +60,16 @@ db.exec(`
 `);
 
 try {
-  db.exec("ALTER TABLE products ADD COLUMN name TEXT");
+  db.exec("ALTER TABLE products ADD COLUMN purchase_price_usd REAL DEFAULT 0");
 } catch(e) {}
 try {
-  db.exec("ALTER TABLE products ADD COLUMN warehouse_location TEXT");
+  db.exec("ALTER TABLE products ADD COLUMN buffer_percentage REAL DEFAULT 0");
+} catch(e) {}
+try {
+  db.exec("ALTER TABLE products ADD COLUMN exchange_rate_used REAL DEFAULT 0");
+} catch(e) {}
+try {
+  db.exec("ALTER TABLE products ADD COLUMN weight REAL DEFAULT 0");
 } catch(e) {}
 
 db.exec(`
@@ -131,6 +142,8 @@ insertSetting.run("company_name", "DSDST Panel");
 insertSetting.run("low_stock_threshold", "5");
 insertSetting.run("currency_symbol", "₺");
 insertSetting.run("language", "tr");
+insertSetting.run("usd_exchange_rate", "32.5");
+insertSetting.run("default_buffer_percentage", "20");
 insertSetting.run("commission_rates", JSON.stringify({
   "Trendyol": 15,
   "Hepsiburada": 15,
@@ -139,7 +152,7 @@ insertSetting.run("commission_rates", JSON.stringify({
   "Website": 2,
   "Instagram": 0
 }));
-insertSetting.run("product_categories", JSON.stringify(["T-Shirt", "Çanta", "Sandalye", "Telefon Kılıfı", "Kupa", "Cüzdan", "Defter", "Diğer"]));
+insertSetting.run("product_categories", JSON.stringify(["Aliminyum", "PPR", "Dokum Demir", "Karbon Celik"]));
 insertSetting.run("income_categories", JSON.stringify(["Satış", "İade", "Hizmet Bedeli", "Diğer"]));
 insertSetting.run("expense_categories", JSON.stringify(["Kargo", "Komisyon", "Maliyet", "Reklam", "Vergi", "Diğer"]));
 
@@ -189,7 +202,12 @@ async function startServer() {
     const totalRevenue = revenueResult?.total || 0;
     const totalExpenses = (realizedExpensesResult?.total || 0) + pendingRecurringTotal;
 
-    const lowStock = db.prepare("SELECT COUNT(*) as count FROM product_platforms WHERE stock <= (SELECT value FROM settings WHERE key = 'low_stock_threshold') AND is_listed = 1").get() as any;
+    const lowStock = db.prepare(`
+      SELECT COUNT(*) as count 
+      FROM products p
+      WHERE (SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id) <= (SELECT value FROM settings WHERE key = 'low_stock_threshold')
+      AND p.status = 'Active'
+    `).get() as any;
 
     res.json({
       totalRevenue,
@@ -283,15 +301,23 @@ async function startServer() {
 
   app.post("/api/products", (req, res) => {
     const id = uuidv4();
-    const { name, title, warehouse_location, sku, barcode, category, model, description, purchase_cost, sale_price, status, notes, platforms } = req.body;
+    const { 
+      name, title, warehouse_location, sku, barcode, category, model, description, 
+      purchase_price_usd, purchase_cost, sale_price, buffer_percentage, exchange_rate_used,
+      weight, status, notes, platforms, images 
+    } = req.body;
     
     const insertProduct = db.prepare(`
-      INSERT INTO products (id, name, title, warehouse_location, sku, barcode, category, model, description, purchase_cost, sale_price, status, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products (id, name, title, warehouse_location, sku, barcode, category, model, description, purchase_price_usd, purchase_cost, sale_price, buffer_percentage, exchange_rate_used, weight, status, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     db.transaction(() => {
-      insertProduct.run(id, name, title, warehouse_location, sku || `SKU-${Date.now()}`, barcode, category, model, description, purchase_cost, sale_price, status, notes);
+      insertProduct.run(
+        id, name, title, warehouse_location, sku || `SKU-${Date.now()}`, barcode, category, model, description, 
+        purchase_price_usd || 0, purchase_cost || 0, sale_price || 0, buffer_percentage || 0, exchange_rate_used || 0,
+        weight || 0, status, notes
+      );
       
       const insertPlatform = db.prepare(`
         INSERT INTO product_platforms (id, product_id, platform_name, stock, price, is_listed)
@@ -301,19 +327,37 @@ async function startServer() {
       for (const p of platforms) {
         insertPlatform.run(uuidv4(), id, p.name, p.stock || 0, p.price || sale_price, p.is_listed ? 1 : 0);
       }
+
+      if (images && Array.isArray(images)) {
+        const insertImg = db.prepare("INSERT INTO product_images (id, product_id, path, sort_order) VALUES (?, ?, ?, ?)");
+        images.forEach((img: any, idx: number) => {
+          insertImg.run(uuidv4(), id, img.path || img, idx);
+        });
+      }
     })();
 
     res.json({ id });
   });
 
   app.put("/api/products/:id", (req, res) => {
-    const { name, title, warehouse_location, sku, barcode, category, model, description, purchase_cost, sale_price, status, notes, platforms } = req.body;
+    const { 
+      name, title, warehouse_location, sku, barcode, category, model, description, 
+      purchase_price_usd, purchase_cost, sale_price, buffer_percentage, exchange_rate_used,
+      weight, status, notes, platforms, images 
+    } = req.body;
     
     db.transaction(() => {
       db.prepare(`
-        UPDATE products SET name=?, title=?, warehouse_location=?, sku=?, barcode=?, category=?, model=?, description=?, purchase_cost=?, sale_price=?, status=?, notes=?, updated_at=CURRENT_TIMESTAMP
+        UPDATE products SET 
+          name=?, title=?, warehouse_location=?, sku=?, barcode=?, category=?, model=?, description=?, 
+          purchase_price_usd=?, purchase_cost=?, sale_price=?, buffer_percentage=?, exchange_rate_used=?,
+          weight=?, status=?, notes=?, updated_at=CURRENT_TIMESTAMP
         WHERE id=?
-      `).run(name, title, warehouse_location, sku, barcode, category, model, description, purchase_cost, sale_price, status, notes, req.params.id);
+      `).run(
+        name, title, warehouse_location, sku, barcode, category, model, description, 
+        purchase_price_usd || 0, purchase_cost || 0, sale_price || 0, buffer_percentage || 0, exchange_rate_used || 0,
+        weight || 0, status, notes, req.params.id
+      );
 
       db.prepare("DELETE FROM product_platforms WHERE product_id = ?").run(req.params.id);
       
@@ -325,9 +369,28 @@ async function startServer() {
       for (const p of platforms) {
         insertPlatform.run(uuidv4(), req.params.id, p.name, p.stock || 0, p.price || sale_price, p.is_listed ? 1 : 0);
       }
+
+      if (images && Array.isArray(images)) {
+        // Only insert if it doesn't already exist or handle syncing.
+        // For simplicity, if they pass images, we might want to refresh them or only add new ones.
+        // Let's assume on edit we only pass NEW URLs to add.
+        const insertImg = db.prepare("INSERT INTO product_images (id, product_id, path, sort_order) VALUES (?, ?, ?, ?)");
+        images.forEach((img: any, idx: number) => {
+          if (img.id && img.id.startsWith('temp-')) {
+             insertImg.run(uuidv4(), req.params.id, img.path, idx + 100);
+          }
+        });
+      }
     })();
 
     res.json({ success: true });
+  });
+
+  app.delete("/api/products", (req, res) => {
+    console.log("Bulk deleting all products...");
+    const result = db.prepare("DELETE FROM products").run();
+    console.log(`Deleted ${result.changes} products.`);
+    res.json({ success: true, deletedCount: result.changes });
   });
 
   app.delete("/api/products/:id", (req, res) => {

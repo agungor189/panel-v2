@@ -50,5 +50,5 @@ export const formatCurrency = (value: number, symbol = "₺") => {
 };
 
 export const PLATFORMS = ["Trendyol", "Hepsiburada", "Amazon", "N11", "Website", "Instagram"];
-export const MATERIALS = ["Pamuk", "Polyester", "Deri", "Metal", "Plastik", "Ahşap", "Kumaş", "Diğer"];
-export const CATEGORIES = ["T-Shirt", "Çanta", "Sandalye", "Telefon Kılıfı", "Kupa", "Cüzdan", "Defter", "Diğer"];
+export const MATERIALS = ["Aliminyum", "PPR", "Dokum Demir", "Karbon Celik"];
+export const CATEGORIES = ["Aliminyum", "PPR", "Dokum Demir", "Karbon Celik"];
