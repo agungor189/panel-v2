@@ -23,7 +23,6 @@ import Transactions from './components/Transactions';
 import Analytics from './components/Analytics';
 import RecurringPayments from './components/RecurringPayments';
 import SettingsView from './components/SettingsView';
-import LoginPage from './components/LoginPage';
 import { api } from './lib/api';
 import { Settings } from './types';
 import { clsx, type ClassValue } from 'clsx';
@@ -36,13 +35,6 @@ function cn(...inputs: ClassValue[]) {
 type View = 'dashboard' | 'products' | 'product-detail' | 'product-wizard' | 'stock' | 'income' | 'expense' | 'recurring' | 'analytics' | 'settings';
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('isAuthenticated') === 'true';
-    } catch {
-      return false;
-    }
-  });
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -76,10 +68,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated) {
-      loadSettings();
-    }
-  }, [isAuthenticated]);
+    loadSettings();
+  }, []);
 
   const loadSettings = async () => {
     try {
@@ -88,20 +78,6 @@ export default function App() {
     } catch (err) {
       console.error("Settings load error:", err);
     }
-  };
-
-  const handleLogin = () => {
-    setIsAuthenticated(true);
-    loadSettings();
-  };
-
-  const handleLogout = () => {
-    try {
-      localStorage.removeItem('isAuthenticated');
-    } catch {
-      // ignore
-    }
-    setIsAuthenticated(false);
   };
 
   const navigateToProduct = (id: string) => {
@@ -118,11 +94,6 @@ export default function App() {
     { id: 'analytics', label: 'Analizler', icon: BarChart3 },
     { id: 'settings', label: 'Ayarlar', icon: SettingsIcon },
   ];
-
-  // Removed the null check to prevent white screen wait
-  if (!isAuthenticated) {
-    return <LoginPage onLogin={handleLogin} />;
-  }
 
   return (
     <div className="min-h-screen bg-bg-main text-text-main font-sans selection:bg-primary/10">
@@ -171,18 +142,6 @@ export default function App() {
             </button>
           ))}
         </nav>
-
-        {(isSidebarOpen || isMobileMenuOpen) && (
-          <div className="absolute bottom-16 left-0 w-full px-4">
-             <button 
-               onClick={handleLogout}
-               className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl bg-white/5 text-red-400 hover:bg-red-500 hover:text-white transition-all text-sm font-bold"
-             >
-                <LogOut className="w-5 h-5" />
-                <span>Çıkış Yap</span>
-             </button>
-          </div>
-        )}
 
         <button 
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
