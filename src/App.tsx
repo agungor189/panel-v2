@@ -36,7 +36,13 @@ function cn(...inputs: ClassValue[]) {
 type View = 'dashboard' | 'products' | 'product-detail' | 'product-wizard' | 'stock' | 'income' | 'expense' | 'recurring' | 'analytics' | 'settings';
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('isAuthenticated') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -70,19 +76,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // Check initial auth state
-    let auth = false;
-    try {
-      auth = localStorage.getItem('isAuthenticated') === 'true';
-    } catch {
-      // ignore
-    }
-    setIsAuthenticated(auth);
-    
-    if (auth) {
+    if (isAuthenticated) {
       loadSettings();
     }
-  }, []);
+  }, [isAuthenticated]);
 
   const loadSettings = async () => {
     try {
@@ -122,9 +119,7 @@ export default function App() {
     { id: 'settings', label: 'Ayarlar', icon: SettingsIcon },
   ];
 
-  // While checking initial auth, don't show anything to prevent flicker
-  if (isAuthenticated === null) return null;
-
+  // Removed the null check to prevent white screen wait
   if (!isAuthenticated) {
     return <LoginPage onLogin={handleLogin} />;
   }
