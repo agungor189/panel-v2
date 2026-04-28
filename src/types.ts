@@ -52,6 +52,23 @@ export interface Transaction {
   note: string;
   reference_number: string;
   recurring_id?: string;
+  title?: string;
+  description?: string;
+  payment_method?: string;
+  supplier?: string;
+  invoice_number?: string;
+  attachment_count?: number;
+  created_at?: string;
+}
+
+export interface ExpenseAttachment {
+  id: string;
+  expense_id: string;
+  file_name: string;
+  file_path: string;
+  mime_type: string;
+  file_size: number;
+  uploaded_at: string;
 }
 
 export interface RecurringPayment {

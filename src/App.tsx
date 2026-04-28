@@ -25,6 +25,7 @@ import ProductList from './components/ProductList';
 import ProductDetail from './components/ProductDetail';
 import ProductWizard from './components/ProductWizard';
 import Transactions from './components/Transactions';
+import Expenses from './components/Expenses';
 import Analytics from './components/Analytics';
 import RecurringPayments from './components/RecurringPayments';
 import SettingsView from './components/SettingsView';
@@ -423,7 +424,7 @@ export default function App() {
           )}
           {currentView === 'sales' && <Sales />}
           {currentView === 'income' && <Transactions initialType="Income" settings={settings} />}
-          {currentView === 'expense' && <Transactions initialType="Expense" settings={settings} />}
+          {currentView === 'expense' && <Expenses settings={settings} />}
           {currentView === 'recurring' && <RecurringPayments settings={settings} />}
           {currentView === 'analytics' && <Analytics settings={settings} />}
           {currentView === 'activity-logs' && <ActivityLogs />}

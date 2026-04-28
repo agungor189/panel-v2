@@ -13,6 +13,18 @@ import rateLimit from "express-rate-limit";
 import AdmZip from "adm-zip";
 import crypto from "crypto";
 
+declare global {
+  namespace Express {
+    interface Request {
+      panelApiKey?: {
+        id: string;
+        name: string;
+        permissions: string[];
+      }
+    }
+  }
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -328,6 +340,25 @@ try {
   db.exec("ALTER TABLE transactions ADD COLUMN recurring_id TEXT");
 } catch(e) {}
 
+try { db.exec("ALTER TABLE transactions ADD COLUMN title TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN description TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN payment_method TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN supplier TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN invoice_number TEXT"); } catch(e) {}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS expense_attachments (
+    id TEXT PRIMARY KEY,
+    expense_id TEXT,
+    file_name TEXT,
+    file_path TEXT,
+    mime_type TEXT,
+    file_size INTEGER,
+    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(expense_id) REFERENCES transactions(id) ON DELETE CASCADE
+  );
+`);
+
 // Default settings
 const insertSetting = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
 insertSetting.run("company_name", "DSDST Panel");
@@ -360,7 +391,34 @@ const storage = multer.diskStorage({
     cb(null, `${uuidv4()}${ext}`);
   }
 });
+
+const expenseStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const expensesDir = path.join(process.cwd(), 'uploads', 'expenses');
+    if (!fs.existsSync(expensesDir)) {
+      fs.mkdirSync(expensesDir, { recursive: true });
+    }
+    cb(null, expensesDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `expense_${uuidv4()}${ext}`);
+  }
+});
+
 const upload = multer({ storage });
+const expenseUpload = multer({ 
+  storage: expenseStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Sadece JPG, PNG, WEBP ve PDF dosyaları yüklenebilir.'));
+    }
+  }
+});
 const backupUpload = multer({ dest: os.tmpdir() });
 
 function logActivity(action: string, entity_type: string, entity_id: string, details?: any) {
@@ -765,6 +823,107 @@ async function startServer() {
   app.get("/api/stock/movements/:productId", (req, res) => {
     const logs = db.prepare("SELECT * FROM stock_movements WHERE product_id = ? ORDER BY created_at DESC").all(req.params.productId);
     res.json(logs);
+  });
+
+  // Expenses API
+  app.get("/api/expenses", (req, res) => {
+    const expenses = db.prepare(`
+      SELECT t.*, 
+             (SELECT COUNT(*) FROM expense_attachments WHERE expense_id = t.id) as attachment_count
+      FROM transactions t 
+      WHERE t.type = 'Expense'
+      ORDER BY t.date DESC
+    `).all();
+    res.json(expenses);
+  });
+
+  app.get("/api/expenses/:id", (req, res) => {
+    const expense = db.prepare(`
+      SELECT t.*
+      FROM transactions t 
+      WHERE t.id = ? AND t.type = 'Expense'
+    `).get(req.params.id);
+
+    if (!expense) return res.status(404).json({ error: "Expense not found" });
+
+    const attachments = db.prepare("SELECT * FROM expense_attachments WHERE expense_id = ? ORDER BY uploaded_at DESC").all(req.params.id);
+    
+    res.json({ ...expense, attachments });
+  });
+
+  app.post("/api/expenses", (req, res) => {
+    const { date, category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number } = req.body;
+    const txId = uuidv4();
+    db.prepare(`
+      INSERT INTO transactions (id, date, type, category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number)
+      VALUES (?, ?, 'Expense', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(txId, date || new Date().toISOString(), category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number);
+    logActivity('CREATE', 'expense', txId, { after: req.body });
+    res.json({ id: txId, success: true });
+  });
+
+  app.put("/api/expenses/:id", (req, res) => {
+    const { date, category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number } = req.body;
+    
+    const beforeState = db.prepare("SELECT * FROM transactions WHERE id = ?").get(req.params.id);
+    
+    db.prepare(`
+      UPDATE transactions
+      SET date = ?, category = ?, platform = ?, amount = ?, note = ?, reference_number = ?, title = ?, description = ?, payment_method = ?, supplier = ?, invoice_number = ?
+      WHERE id = ? AND type = 'Expense'
+    `).run(date || new Date().toISOString(), category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number, req.params.id);
+    
+    logActivity('UPDATE', 'expense', req.params.id, { before: beforeState, after: req.body });
+    res.json({ success: true });
+  });
+
+  app.delete("/api/expenses/:id", (req, res) => {
+    const beforeState = db.prepare("SELECT * FROM transactions WHERE id = ?").get(req.params.id);
+    
+    const attachments = db.prepare("SELECT file_path FROM expense_attachments WHERE expense_id = ?").all(req.params.id) as any[];
+    for(const att of attachments) {
+      if (att.file_path && fs.existsSync(path.join(process.cwd(), att.file_path))) {
+         try { fs.unlinkSync(path.join(process.cwd(), att.file_path)); } catch(e) {}
+      }
+    }
+    
+    db.prepare("DELETE FROM transactions WHERE id = ?").run(req.params.id);
+    logActivity('DELETE', 'expense', req.params.id, { before: beforeState, after: {} });
+    res.json({ success: true });
+  });
+
+  app.post("/api/expenses/:id/attachments", expenseUpload.single("file"), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    const attId = uuidv4();
+    const filePath = `uploads/expenses/${req.file.filename}`;
+    
+    try {
+      db.prepare(`
+        INSERT INTO expense_attachments (id, expense_id, file_name, file_path, mime_type, file_size)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(attId, req.params.id, req.file.originalname, filePath, req.file.mimetype, req.file.size);
+      
+      const attachment = db.prepare("SELECT * FROM expense_attachments WHERE id = ?").get(attId);
+      res.json({ success: true, attachment });
+    } catch (err: any) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/expenses/:id/attachments/:attachmentId", (req, res) => {
+    const attachment = db.prepare("SELECT * FROM expense_attachments WHERE id = ? AND expense_id = ?").get(req.params.attachmentId, req.params.id) as any;
+    
+    if (!attachment) return res.status(404).json({ error: "Attachment not found" });
+
+    if (attachment.file_path && fs.existsSync(path.join(process.cwd(), attachment.file_path))) {
+      try { fs.unlinkSync(path.join(process.cwd(), attachment.file_path)); } catch(e) {}
+    }
+
+    db.prepare("DELETE FROM expense_attachments WHERE id = ?").run(req.params.attachmentId);
+    
+    res.json({ success: true });
   });
 
   // Transactions CRUD
