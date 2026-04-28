@@ -206,8 +206,6 @@ db.exec(`
     status TEXT DEFAULT 'active',
     last4 TEXT,
     notes TEXT,
-    last_test_status TEXT,
-    last_tested_at DATETIME,
     last_used_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -1036,12 +1034,18 @@ async function startServer() {
 
   app.get("/api/integrations/keys", apiLimiter, (req, res) => {
     try {
-      const keys = db.prepare("SELECT id, service_name, display_name, key_name, status, last4, notes, last_test_status, last_tested_at, last_used_at, created_at, updated_at FROM api_keys WHERE deleted_at IS NULL ORDER BY created_at DESC").all() as any[];
+      const keys = db.prepare("SELECT id, service_name, display_name, key_name, status, last4, notes, last_used_at, created_at, updated_at FROM api_keys WHERE deleted_at IS NULL ORDER BY created_at DESC").all() as any[];
       
-      const safeKeys = keys.map(k => ({
-        ...k,
-        maskedKey: `********${k.last4 || '----'}`,
-      }));
+      const safeKeys = keys.map(k => {
+        const testStatusRow = db.prepare("SELECT value FROM settings WHERE key = ?").get(`last_test_status_${k.id}`) as any;
+        const testedAtRow = db.prepare("SELECT value FROM settings WHERE key = ?").get(`last_tested_at_${k.id}`) as any;
+        return {
+          ...k,
+          last_test_status: testStatusRow ? testStatusRow.value : null,
+          last_tested_at: testedAtRow ? testedAtRow.value : null,
+          maskedKey: `********${k.last4 || '----'}`,
+        };
+      });
 
       res.json(safeKeys);
     } catch (err: any) {
@@ -1206,7 +1210,10 @@ async function startServer() {
          message = `Test başarılı (${current.service_name} bağlantı adımı atlandı)`;
       }
 
-      db.prepare("UPDATE api_keys SET last_test_status = ?, last_tested_at = CURRENT_TIMESTAMP, last_used_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, id);
+      db.prepare("UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(`last_test_status_${id}`, status);
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, CURRENT_TIMESTAMP)").run(`last_tested_at_${id}`);
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_test_status', ?)").run(status);
 
       logActivity("API_KEY_TESTED", "integration", id, { 
          after: { result: status, message },
@@ -1247,10 +1254,16 @@ async function startServer() {
     try {
       const keys = db.prepare("SELECT id, name, key_prefix, last4, status, environment, permissions, allowed_ips, expires_at, last_used_at, last_used_ip, created_at, updated_at, revoked_at FROM panel_api_keys WHERE deleted_at IS NULL ORDER BY created_at DESC").all() as any[];
       
-      const safeKeys = keys.map(k => ({
-        ...k,
-        maskedKey: `${k.key_prefix}********${k.last4}`,
-      }));
+      const safeKeys = keys.map(k => {
+        const testStatusRow = db.prepare("SELECT value FROM settings WHERE key = ?").get(`last_test_status_${k.id}`) as any;
+        const testedAtRow = db.prepare("SELECT value FROM settings WHERE key = ?").get(`last_tested_at_${k.id}`) as any;
+        return {
+          ...k,
+          last_test_status: testStatusRow ? testStatusRow.value : null,
+          last_tested_at: testedAtRow ? testedAtRow.value : null,
+          maskedKey: `${k.key_prefix}********${k.last4}`,
+        };
+      });
 
       res.json(safeKeys);
     } catch (err: any) {
@@ -1401,7 +1414,9 @@ async function startServer() {
          message = "Anahtar süresi dolmuş.";
       }
 
-      db.prepare("UPDATE panel_api_keys SET last_test_status = ?, last_tested_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, id);
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(`last_test_status_${id}`, status);
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, CURRENT_TIMESTAMP)").run(`last_tested_at_${id}`);
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_test_status', ?)").run(status);
 
       logActivity("PANEL_API_KEY_TESTED", "integration", id, { 
          after: { result: status, message },
