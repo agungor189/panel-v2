@@ -89,7 +89,9 @@ db.exec(`
     purchase_cost REAL DEFAULT 0,
     sale_price REAL DEFAULT 0,
     buffer_percentage REAL DEFAULT 0,
+    profit_percentage REAL DEFAULT 0,
     exchange_rate_used REAL DEFAULT 0,
+    price_locked BOOLEAN DEFAULT 0,
     status TEXT DEFAULT 'Active',
     weight REAL DEFAULT 0,
     notes TEXT,
@@ -118,6 +120,12 @@ try {
 } catch(e) {}
 try {
   db.exec("ALTER TABLE products ADD COLUMN exchange_rate_used REAL DEFAULT 0");
+} catch(e) {}
+try {
+  db.exec("ALTER TABLE products ADD COLUMN profit_percentage REAL DEFAULT 0");
+} catch(e) {}
+try {
+  db.exec("ALTER TABLE products ADD COLUMN price_locked BOOLEAN DEFAULT 0");
 } catch(e) {}
 try {
   db.exec("ALTER TABLE products ADD COLUMN weight REAL DEFAULT 0");
@@ -459,11 +467,31 @@ async function startServer() {
         ORDER BY total_stock ASC
       `).all() as any[];
 
+      const allProducts = db.prepare(`
+        SELECT p.id, p.sale_price, p.purchase_price_usd, p.exchange_rate_used, p.buffer_percentage,
+          COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) as total_stock
+        FROM products p
+      `).all() as any[];
+
+      let totalSaleValue = 0;
+      let totalCostValue = 0;
+      let totalBufferedCostValue = 0;
+
+      for (const p of allProducts) {
+        totalSaleValue += (p.total_stock * (p.sale_price || 0));
+        const cost = (p.purchase_price_usd || 0) * (p.exchange_rate_used || 0);
+        totalCostValue += (p.total_stock * cost);
+        totalBufferedCostValue += (p.total_stock * cost * (1 + (p.buffer_percentage || 0) / 100));
+      }
+
       const metrics = {
         totalRevenue,
         totalExpenses,
         netProfit: totalRevenue - totalExpenses,
         lowStockCount: lowStockProductsQuery.length,
+        totalStockSalesValue: totalSaleValue,
+        totalStockCostValue: totalCostValue,
+        totalBufferedCostValue: totalBufferedCostValue,
         lowStockProducts: lowStockProductsQuery
       };
 
@@ -540,19 +568,19 @@ async function startServer() {
     const id = uuidv4();
     const { 
       name, title, warehouse_location, sku, barcode, category, model, description, 
-      purchase_price_usd, purchase_cost, sale_price, buffer_percentage, exchange_rate_used,
+      purchase_price_usd, purchase_cost, sale_price, buffer_percentage, profit_percentage, exchange_rate_used, price_locked,
       weight, status, notes, platforms, images 
     } = req.body;
     
     const insertProduct = db.prepare(`
-      INSERT INTO products (id, name, title, warehouse_location, sku, barcode, category, model, description, purchase_price_usd, purchase_cost, sale_price, buffer_percentage, exchange_rate_used, weight, status, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products (id, name, title, warehouse_location, sku, barcode, category, model, description, purchase_price_usd, purchase_cost, sale_price, buffer_percentage, profit_percentage, exchange_rate_used, price_locked, weight, status, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     db.transaction(() => {
       insertProduct.run(
         id, name, title, warehouse_location, sku || `SKU-${Date.now()}`, barcode, category, model, description, 
-        purchase_price_usd || 0, purchase_cost || 0, sale_price || 0, buffer_percentage || 0, exchange_rate_used || 0,
+        purchase_price_usd || 0, purchase_cost || 0, sale_price || 0, buffer_percentage || 0, profit_percentage || 0, exchange_rate_used || 0, price_locked ? 1 : 0, 
         weight || 0, status, notes
       );
       
@@ -577,10 +605,44 @@ async function startServer() {
     res.json({ id });
   });
 
+  app.post("/api/products/bulk-pricing", (req, res) => {
+    try {
+      const { updates, settings } = req.body;
+      const { exchangeRate, bufferPercentage, profitPercentage } = settings;
+
+      db.transaction(() => {
+        const stmt = db.prepare(`
+          UPDATE products 
+          SET sale_price = ?, 
+              exchange_rate_used = ?, 
+              buffer_percentage = ?, 
+              profit_percentage = ?, 
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `);
+        
+        const platformStmt = db.prepare(`
+          UPDATE product_platforms 
+          SET price = ? 
+          WHERE product_id = ?
+        `);
+
+        for (const update of updates) {
+          stmt.run(update.newSalePrice, exchangeRate, bufferPercentage, profitPercentage, update.id);
+          platformStmt.run(update.newSalePrice, update.id);
+        }
+      })();
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.put("/api/products/:id", (req, res) => {
     const { 
       name, title, warehouse_location, sku, barcode, category, model, description, 
-      purchase_price_usd, purchase_cost, sale_price, buffer_percentage, exchange_rate_used,
+      purchase_price_usd, purchase_cost, sale_price, buffer_percentage, profit_percentage, exchange_rate_used, price_locked,
       weight, status, notes, platforms, images 
     } = req.body;
     
@@ -594,12 +656,12 @@ async function startServer() {
       db.prepare(`
         UPDATE products SET 
           name=?, title=?, warehouse_location=?, sku=?, barcode=?, category=?, model=?, description=?, 
-          purchase_price_usd=?, purchase_cost=?, sale_price=?, buffer_percentage=?, exchange_rate_used=?,
+          purchase_price_usd=?, purchase_cost=?, sale_price=?, buffer_percentage=?, profit_percentage=?, exchange_rate_used=?, price_locked=?,
           weight=?, status=?, notes=?, updated_at=CURRENT_TIMESTAMP
         WHERE id=?
       `).run(
         name, title, warehouse_location, sku, barcode, category, model, description, 
-        purchase_price_usd || 0, purchase_cost || 0, sale_price || 0, buffer_percentage || 0, exchange_rate_used || 0,
+        purchase_price_usd || 0, purchase_cost || 0, sale_price || 0, buffer_percentage || 0, profit_percentage || 0, exchange_rate_used || 0, price_locked ? 1 : 0,
         weight || 0, status, notes, req.params.id
       );
 
@@ -1004,6 +1066,15 @@ async function startServer() {
       const { customer_name, customer_phone, customer_address, shipping_company, tracking_number, total_weight, total_quantity, total_amount, items } = req.body;
       
       db.transaction(() => {
+        // 1. Stock Validation for all items
+        for (const item of items) {
+          const totalStockResult = db.prepare("SELECT COALESCE(SUM(stock), 0) as total FROM product_platforms WHERE product_id = ?").get(item.product_id) as any;
+          if (totalStockResult.total < item.quantity) {
+            throw new Error(`Yetersiz stok. ${item.product_name} için mevcut stok: ${totalStockResult.total} adet.`);
+          }
+        }
+
+        // 2. Create Sale
         db.prepare(`
           INSERT INTO sales (id, customer_name, customer_phone, customer_address, shipping_company, tracking_number, total_weight, total_quantity, total_amount)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1014,14 +1085,36 @@ async function startServer() {
           VALUES (?, ?, ?, ?, ?, ?)
         `);
 
+        // 3. Process items: Sale Items, Stock deduction, Stock Movements
         for (const item of items) {
           insertItem.run(uuidv4(), id, item.product_id, item.product_name, item.quantity, item.weight);
+
+          let remainingToDeduct = item.quantity;
+          const platforms = db.prepare("SELECT * FROM product_platforms WHERE product_id = ? AND stock > 0 ORDER BY stock DESC").all(item.product_id) as any[];
+
+          for (const plat of platforms) {
+            if (remainingToDeduct <= 0) break;
+            const deduct = Math.min(plat.stock, remainingToDeduct);
+            db.prepare("UPDATE product_platforms SET stock = stock - ? WHERE id = ?").run(deduct, plat.id);
+            
+            db.prepare("INSERT INTO stock_movements (id, product_id, platform_name, change_amount, reason) VALUES (?, ?, ?, ?, ?)")
+              .run(uuidv4(), item.product_id, plat.platform_name, -deduct, `satıştan otomatik düşüldü (Satış no: ${id})`);
+            
+            remainingToDeduct -= deduct;
+          }
         }
+
+        // 4. Create Income Transaction
+        db.prepare(`
+          INSERT INTO transactions (id, type, category, platform, amount, note)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(uuidv4(), 'Income', 'Satış', 'Satış Sistemi', total_amount, `Satış geliri - ${customer_name}`);
+        
       })();
 
-      res.json({ id });
+      res.json({ success: true, saleId: id, message: "Satış kaydedildi, stok düşüldü ve gelir işlendi." });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(400).json({ success: false, error: err.message });
     }
   });
 

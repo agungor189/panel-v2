@@ -321,23 +321,25 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
             </div>
 
             <div className="p-6 lg:p-8 bg-primary/5 rounded-[24px] border border-primary/10 space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <Field label="Alış Fiyatı ($)" required>
                   <div className="relative">
                     <div className="absolute left-4 top-3.5 text-text-muted font-bold text-sm">$</div>
                     <input 
                       type="number" 
                       step="0.01"
+                      min="0"
                       value={formData.purchase_price_usd} 
                       onChange={(e) => {
                         const usd = parseFloat(e.target.value) || 0;
                         const costTl = usd * formData.exchange_rate_used;
-                        const saleTl = costTl * (1 + formData.buffer_percentage / 100);
+                        const bufferedCostTl = costTl * (1 + formData.buffer_percentage / 100);
+                        const saleTl = bufferedCostTl * (1 + formData.profit_percentage / 100);
                         setFormData((prev: any) => ({ 
                           ...prev, 
                           purchase_price_usd: usd, 
                           purchase_cost: costTl,
-                          sale_price: Math.ceil(saleTl)
+                          sale_price: prev.price_locked ? prev.sale_price : Math.ceil(saleTl)
                         }));
                       }}
                       className="form-input pl-10 font-black text-lg" 
@@ -350,44 +352,69 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
                     <input 
                       type="number" 
                       step="0.01"
+                      min="0"
                       value={formData.exchange_rate_used} 
                       onChange={(e) => {
                         const rate = parseFloat(e.target.value) || 0;
                         const costTl = formData.purchase_price_usd * rate;
-                        const saleTl = costTl * (1 + formData.buffer_percentage / 100);
+                        const bufferedCostTl = costTl * (1 + formData.buffer_percentage / 100);
+                        const saleTl = bufferedCostTl * (1 + formData.profit_percentage / 100);
                         setFormData((prev: any) => ({ 
                           ...prev, 
                           exchange_rate_used: rate, 
                           purchase_cost: costTl,
-                          sale_price: Math.ceil(saleTl)
+                          sale_price: prev.price_locked ? prev.sale_price : Math.ceil(saleTl)
                         }));
                       }}
                       className="form-input pl-10 font-bold" 
                     />
                   </div>
                 </Field>
-                <Field label="Buffer / Kar Oranı (%)">
+                <Field label="Buffer Marjı (%)">
                   <div className="relative">
                     <div className="absolute right-4 top-3.5 text-text-muted font-bold text-sm">%</div>
                     <input 
                       type="number" 
+                      min="0"
                       value={formData.buffer_percentage} 
                       onChange={(e) => {
                         const buff = parseFloat(e.target.value) || 0;
-                        const saleTl = formData.purchase_cost * (1 + buff / 100);
+                        const bufferedCostTl = formData.purchase_cost * (1 + buff / 100);
+                        const saleTl = bufferedCostTl * (1 + formData.profit_percentage / 100);
                         setFormData((prev: any) => ({ 
                           ...prev, 
                           buffer_percentage: buff, 
-                          sale_price: Math.ceil(saleTl)
+                          sale_price: prev.price_locked ? prev.sale_price : Math.ceil(saleTl)
                         }));
                       }}
-                      className="form-input pr-10 font-bold text-primary" 
+                      className="form-input pr-10 font-bold text-orange-600" 
+                    />
+                  </div>
+                </Field>
+                <Field label="Kâr Yüzdesi (%)">
+                  <div className="relative">
+                    <div className="absolute right-4 top-3.5 text-text-muted font-bold text-sm">%</div>
+                    <input 
+                      type="number" 
+                      min="0"
+                      value={formData.profit_percentage} 
+                      onChange={(e) => {
+                        const profit = parseFloat(e.target.value) || 0;
+                        const bufferedCostTl = formData.purchase_cost * (1 + formData.buffer_percentage / 100);
+                        const saleTl = bufferedCostTl * (1 + profit / 100);
+                        setFormData((prev: any) => ({ 
+                          ...prev, 
+                          profit_percentage: profit, 
+                          sale_price: prev.price_locked ? prev.sale_price : Math.ceil(saleTl)
+                        }));
+                      }}
+                      className="form-input pr-10 font-bold text-green-600" 
                     />
                   </div>
                 </Field>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-t border-primary/10 pt-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 border-t border-primary/10 pt-8">
                 <Field label="Net Alış Maliyeti (₺)">
                   <div className="relative">
                     <div className="absolute left-4 top-3.5 text-text-muted font-bold text-sm">₺</div>
@@ -396,6 +423,17 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
                       value={formData.purchase_cost.toFixed(2)} 
                       readOnly
                       className="form-input pl-10 font-bold bg-bg-main/50" 
+                    />
+                  </div>
+                </Field>
+                <Field label="Bufferlı Maliyet (₺)">
+                  <div className="relative">
+                    <div className="absolute left-4 top-3.5 text-text-muted font-bold text-sm">₺</div>
+                    <input 
+                      type="number" 
+                      value={(formData.purchase_cost * (1 + formData.buffer_percentage / 100)).toFixed(2)} 
+                      readOnly
+                      className="form-input pl-10 font-bold bg-bg-main/50 text-orange-700" 
                     />
                   </div>
                 </Field>
@@ -408,6 +446,18 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
                       onChange={(e) => setFormData((prev: any) => ({ ...prev, sale_price: parseFloat(e.target.value) || 0 }))}
                       className="form-input pl-10 font-black text-xl text-primary border-primary/30 focus:border-primary shadow-lg shadow-primary/5" 
                     />
+                  </div>
+                  <div className="mt-4 flex items-center gap-2">
+                    <input 
+                      type="checkbox" 
+                      id="price_locked"
+                      checked={formData.price_locked}
+                      onChange={(e) => setFormData((prev: any) => ({ ...prev, price_locked: e.target.checked }))}
+                      className="w-4 h-4 text-primary rounded focus:ring-primary"
+                    />
+                    <label htmlFor="price_locked" className="text-xs font-semibold text-text-main cursor-pointer">
+                      Toplu güncellemelerde fiyatı kitle
+                    </label>
                   </div>
                 </Field>
               </div>

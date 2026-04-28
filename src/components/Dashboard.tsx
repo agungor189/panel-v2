@@ -127,8 +127,8 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
   if (loading) {
     return (
       <div className="space-y-8 animate-in fade-in duration-500">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-          {[...Array(4)].map((_, i) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          {[...Array(8)].map((_, i) => (
             <div key={i} className="p-5 rounded-xl bg-white border border-border-color shadow-sm h-[130px] flex flex-col justify-between">
               <div className="flex items-center justify-between">
                 <div className="w-9 h-9 rounded-lg bg-gray-100 animate-pulse"></div>
@@ -162,7 +162,7 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
       )}
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
         <MetricCard 
           title="Bu Ay Toplam Ciro" 
           error={error}
@@ -203,6 +203,50 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
           color="text-danger"
           bg="bg-orange-50"
           onClick={() => setShowLowStockModal(true)}
+        />
+        <MetricCard 
+          title="Toplam Stok Satış Değeri" 
+          error={error}
+          value={formatCurrency(metrics?.totalStockSalesValue || 0)} 
+          icon={Package} 
+          trend="Mevcut stokların potansiyel değeri" 
+          positive
+          color="text-purple-600"
+          bg="bg-purple-50"
+        />
+        <MetricCard 
+          title="Toplam Stok Maliyeti" 
+          error={error}
+          value={formatCurrency(metrics?.totalBufferedCostValue || 0)} 
+          icon={Package} 
+          trend="Buffer dahil ortalama stok maliyeti" 
+          positive={false}
+          color="text-orange-600"
+          bg="bg-orange-50"
+        />
+        <MetricCard 
+          title="Tahmini Brüt Kâr" 
+          error={error}
+          value={formatCurrency((metrics?.totalStockSalesValue || 0) - (metrics?.totalBufferedCostValue || 0))} 
+          icon={TrendingUp} 
+          trend="Satıştan beklenen potansiyel brüt kâr" 
+          positive
+          color="text-green-600"
+          bg="bg-green-50"
+        />
+        <MetricCard 
+          title="Ortalama Kâr Marjı" 
+          error={error}
+          value={
+            (metrics?.totalStockSalesValue || 0) > 0 
+              ? `%${((((metrics?.totalStockSalesValue || 0) - (metrics?.totalBufferedCostValue || 0)) / (metrics?.totalStockSalesValue || 0)) * 100).toFixed(1)}` 
+              : "%0.0"
+          }
+          icon={TrendingUp} 
+          trend="Stokların ortalama satış kâr marjı" 
+          positive
+          color="text-blue-600"
+          bg="bg-blue-50"
         />
       </div>
 

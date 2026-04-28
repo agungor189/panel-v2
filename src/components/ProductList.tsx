@@ -20,6 +20,8 @@ import Papa from 'papaparse';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import BarcodeScannerModal from './BarcodeScannerModal';
+import PricingSettingsModal from './PricingSettingsModal';
+import { Calculator } from 'lucide-react';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -159,7 +161,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
         const name = row[mapping.name] || 'İsimsiz Ürün';
         const category = row[mapping.category] || 'Genel';
         const totalStock = parseInt(row[mapping.stock]) || 0;
-        const salePrice = parseFloat(row[mapping.price]) || 0;
+        const purchasePriceUSD = parseFloat(row[mapping.price]) || 0;
         const barcode = row[mapping.barcode] || '';
         const description = row[mapping.description] || '';
         const weight = parseInt(row[mapping.weight]) || 0;
@@ -177,16 +179,18 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
           warehouse_location: location,
           weight: weight,
           model: 'Standart',
-          purchase_price_usd: 0,
+          purchase_price_usd: purchasePriceUSD,
           purchase_cost: 0,
-          sale_price: salePrice,
+          sale_price: 0,
           buffer_percentage: 0,
+          profit_percentage: 0,
+          price_locked: false,
           exchange_rate_used: 0,
           status: totalStock > 0 ? 'Active' : 'Out of stock',
           platforms: PLATFORMS.map((pName, idx) => ({
             name: pName,
             stock: idx === 0 ? totalStock : 0,
-            price: salePrice,
+            price: 0,
             is_listed: true
           }))
         });
@@ -199,7 +203,13 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
 
     setDeletingAll(false);
     setShowMappingModal(false);
-    alert(`${successCount} ürün başarıyla eklendi.${errorCount > 0 ? ` ${errorCount} üründe hata oluştu.` : ''}`);
+    
+    if (successCount > 0) {
+      setTimeout(() => {
+        setShowPricingModal(true);
+      }, 500);
+    }
+    
     loadProducts();
     if (csvInputRef.current) csvInputRef.current.value = '';
   };
@@ -207,6 +217,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
   const [deletingAll, setDeletingAll] = useState(false);
   const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
   const [deleteAllInput, setDeleteAllInput] = useState("");
+  const [showPricingModal, setShowPricingModal] = useState(false);
 
   const deleteAllProducts = async () => {
     if (deleteAllInput !== "SİL") return;
@@ -226,6 +237,13 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
 
   return (
     <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+      {showPricingModal && (
+        <PricingSettingsModal 
+          onClose={() => setShowPricingModal(false)}
+          onRefresh={loadProducts}
+          products={products}
+        />
+      )}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl lg:text-2xl font-bold text-text-main tracking-tight">Ürün Yönetimi</h2>
@@ -239,6 +257,13 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
             accept=".csv" 
             className="hidden" 
           />
+          <button 
+            onClick={() => setShowPricingModal(true)}
+            className="px-4 h-11 border border-blue-200 bg-blue-50/50 rounded-xl text-xs font-bold text-blue-700 hover:bg-blue-100 transition-all flex items-center shadow-sm"
+          >
+            <Calculator className="w-4 h-4 mr-2" />
+            Toplu Fiyat Yönetimi
+          </button>
           <button 
             onClick={() => csvInputRef.current?.click()}
             className="px-4 h-11 border border-border-color bg-white rounded-xl text-xs font-bold text-text-muted hover:text-primary hover:border-primary transition-all flex items-center shadow-sm"
@@ -442,20 +467,30 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
             <table className="w-full text-left">
               <thead>
                 <tr className="bg-bg-main text-[10px] uppercase tracking-widest text-text-muted font-extrabold border-b border-border-color">
-                  <th className="px-4 lg:px-6 py-5">Ürün</th>
-                  <th className="px-4 lg:px-6 py-5 hidden md:table-cell">Malzeme</th>
-                  <th className="px-4 lg:px-6 py-5 text-center">Stok</th>
-                  <th className="px-4 lg:px-6 py-5">Fiyat</th>
-                  <th className="px-4 lg:px-6 py-5 hidden sm:table-cell">Durum</th>
-                  <th className="px-4 lg:px-6 py-5 text-right">İşlem</th>
+                  <th className="px-4 py-5">Ürün</th>
+                  <th className="px-4 py-5 hidden xl:table-cell">Kategori</th>
+                  <th className="px-4 py-5 hidden md:table-cell text-right">Alış USD</th>
+                  <th className="px-4 py-5 hidden lg:table-cell text-right">Buffer TL</th>
+                  <th className="px-4 py-5 font-bold text-blue-600 text-right">Satış TL</th>
+                  <th className="px-4 py-5 hidden sm:table-cell text-center">Marj %</th>
+                  <th className="px-4 py-5 text-center">Stok</th>
+                  <th className="px-4 py-5 font-bold text-gray-700 text-right">Toplam Değer</th>
+                  <th className="px-4 py-5 hidden sm:table-cell text-center">Durum</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-color">
-                {filteredProducts.map((p) => (
+                {filteredProducts.map((p) => {
+                  const margin = p.sale_price && p.purchase_price_usd && p.exchange_rate_used 
+                    ? ((p.sale_price - (p.purchase_price_usd * p.exchange_rate_used)) / p.sale_price) * 100 
+                    : 0;
+                  const stockValue = (p.total_stock || 0) * (p.sale_price || 0);
+                  const bufferedCostTRY = (p.purchase_price_usd || 0) * (p.exchange_rate_used || 0) * (1 + (p.buffer_percentage || 0) / 100);
+                  
+                  return (
                   <tr key={p.id} onClick={() => onProductClick(p.id)} className="hover:bg-bg-main cursor-pointer group transition-colors">
-                    <td className="px-4 lg:px-6 py-4 lg:py-5">
-                      <div className="flex items-center space-x-3 lg:space-x-4">
-                        <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-lg lg:rounded-xl bg-bg-main border border-border-color overflow-hidden p-1 flex items-center justify-center shrink-0">
+                    <td className="px-4 py-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-10 h-10 rounded-lg bg-bg-main border border-border-color overflow-hidden p-1 flex items-center justify-center shrink-0">
                           {p.cover_image ? (
                             <img src={p.cover_image} alt="" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                           ) : (
@@ -463,34 +498,68 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
                           )}
                         </div>
                         <div className="min-w-0">
-                          <p className="text-sm font-bold text-text-main group-hover:text-primary transition-colors truncate">{p.name || p.title}</p>
-                          <p className="text-[9px] lg:text-[10px] text-text-muted font-mono mt-0.5 uppercase tracking-tighter truncate">{p.sku}</p>
+                          <p className="text-sm font-bold text-text-main group-hover:text-primary transition-colors line-clamp-1">{p.name || p.title}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <p className="text-[10px] text-text-muted font-mono uppercase tracking-tighter truncate">{p.sku}</p>
+                            {p.price_locked && <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1 py-0.5 rounded font-bold">Kilitli</span>}
+                          </div>
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 lg:px-6 py-4 lg:py-5 hidden md:table-cell">
-                      <span className="inline-block whitespace-nowrap text-[10px] font-bold text-text-muted uppercase tracking-widest bg-bg-main px-2 py-1 rounded border border-border-color">
+                    <td className="px-4 py-4 hidden xl:table-cell">
+                      <span className="inline-block whitespace-nowrap text-[10px] font-bold text-text-muted uppercase tracking-widest bg-bg-main px-2 py-1 rounded border border-border-color truncate max-w-[100px]">
                         {p.category}
                       </span>
                     </td>
-                    <td className="px-4 lg:px-6 py-4 lg:py-5 text-center">
+                    <td className="px-4 py-4 hidden md:table-cell text-sm font-medium text-gray-500 text-right">
+                      ${(p.purchase_price_usd || 0).toFixed(2)}
+                    </td>
+                    <td className="px-4 py-4 hidden lg:table-cell text-sm font-medium text-gray-500 text-right">
+                      {formatCurrency(bufferedCostTRY)}
+                    </td>
+                    <td className="px-4 py-4 text-sm font-extrabold text-blue-600 text-right">
+                      {formatCurrency(p.sale_price)}
+                    </td>
+                    <td className="px-4 py-4 hidden sm:table-cell text-center">
                       <span className={cn(
-                        "font-bold text-sm px-2 lg:px-3 py-1 rounded-lg",
+                        "text-[11px] font-bold px-2 py-1 rounded-md",
+                        margin > 0 ? "bg-green-100 text-green-700" : margin < 0 ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-600"
+                      )}>
+                        {margin > 0 ? '+' : ''}{margin.toFixed(1)}%
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-center">
+                      <span className={cn(
+                        "font-bold text-sm px-2 py-1 rounded-lg",
                         (p.total_stock || 0) < 10 ? "text-danger bg-red-50" : "text-text-main bg-bg-main"
                       )}>
                         {p.total_stock}
                       </span>
                     </td>
-                    <td className="px-4 lg:px-6 py-4 lg:py-5 text-sm font-extrabold text-text-main">{formatCurrency(p.sale_price)}</td>
-                    <td className="px-4 lg:px-6 py-4 lg:py-5 hidden sm:table-cell"><StatusBadge status={p.status} /></td>
-                    <td className="px-4 lg:px-6 py-4 lg:py-5 text-right">
-                      <button className="p-2 hover:bg-white border border-transparent hover:border-border-color rounded-lg text-text-muted hover:text-primary transition-all">
-                        <MoreVertical className="w-4 h-4" />
-                      </button>
+                    <td className="px-4 py-4 text-sm font-bold text-gray-700 text-right">
+                      {formatCurrency(stockValue)}
                     </td>
+                    <td className="px-4 py-4 hidden sm:table-cell text-center"><StatusBadge status={p.status} /></td>
                   </tr>
-                ))}
+                )})}
               </tbody>
+              <tfoot className="bg-blue-50/50 border-t-2 border-blue-100">
+                <tr>
+                  <td className="px-4 py-4 text-right font-bold text-gray-700">Genel Toplam:</td>
+                  <td className="px-4 py-4 hidden xl:table-cell"></td>
+                  <td className="px-4 py-4 hidden md:table-cell"></td>
+                  <td className="px-4 py-4 hidden lg:table-cell"></td>
+                  <td className="px-4 py-4 text-right"></td>
+                  <td className="px-4 py-4 hidden sm:table-cell"></td>
+                  <td className="px-4 py-4 text-center font-black text-gray-900 text-sm">
+                    {filteredProducts.reduce((sum, p) => sum + (p.total_stock || 0), 0)}
+                  </td>
+                  <td className="px-4 py-4 text-right font-black text-blue-700 text-sm">
+                    {formatCurrency(filteredProducts.reduce((sum, p) => sum + ((p.total_stock || 0) * (p.sale_price || 0)), 0))}
+                  </td>
+                  <td className="px-4 py-4 hidden sm:table-cell"></td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>
@@ -527,7 +596,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
                           {field === 'name' && 'Ürün Adı (Zorunlu)'}
                           {field === 'category' && 'Malzeme / Kategori'}
                           {field === 'stock' && 'Stok Miktarı'}
-                          {field === 'price' && 'Satış Fiyatı'}
+                          {field === 'price' && 'Alış Fiyatı (USD)'}
                           {field === 'barcode' && 'Barkod'}
                           {field === 'description' && 'Açıklama'}
                           {field === 'weight' && 'Ağırlık (Gram)'}

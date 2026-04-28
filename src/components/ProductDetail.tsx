@@ -89,8 +89,9 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
     </div>
   );
 
-  const profit = product.sale_price - product.purchase_cost;
-  const margin = ((profit / product.sale_price) * 100).toFixed(1);
+  const bufferedCostTRY = product.purchase_cost * (1 + (product.buffer_percentage || 0) / 100);
+  const profit = product.sale_price - bufferedCostTRY;
+  const margin = product.sale_price ? ((profit / product.sale_price) * 100).toFixed(1) : 0;
 
   return (
     <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
@@ -200,15 +201,21 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-6 py-6 border-y border-border-color">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6 py-6 border-y border-border-color">
                 <DetailStat label="Satış Fiyatı" value={formatCurrency(product.sale_price)} color="text-primary font-black" />
                 <DetailStat label="Ağırlık" value={`${product.weight} gr`} color="text-text-muted" />
                 <DetailStat label="Alış ($)" value={`$${product.purchase_price_usd.toFixed(2)}`} color="text-text-muted" subLabel={`₺${product.exchange_rate_used} kur ile`} />
                 <DetailStat label="Maliyet (₺)" value={formatCurrency(product.purchase_cost)} color="text-text-muted" />
                 <DetailStat 
-                  label="Kar / Buffer" 
-                  value={formatCurrency(profit)} 
+                  label="Buffer Maliyet" 
+                  value={formatCurrency(product.purchase_cost * (1 + (product.buffer_percentage || 0) / 100))} 
                   subLabel={`%${product.buffer_percentage} Buffer`} 
+                  color="text-orange-600" 
+                />
+                <DetailStat 
+                  label="Kar Payı" 
+                  value={formatCurrency(profit)} 
+                  subLabel={`%${product.profit_percentage || 0} Kar`} 
                   color="text-success" 
                 />
               </div>

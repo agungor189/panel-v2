@@ -24,6 +24,7 @@ export default function Transactions({ initialType, settings }: { initialType?: 
   const [products, setProducts] = useState<Product[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -83,13 +84,17 @@ export default function Transactions({ initialType, settings }: { initialType?: 
   };
 
   const deleteTx = async (id: string) => {
-    if (confirm("Bu işlemi silmek istediğinize emin misiniz?")) {
-      try {
-        await api.delete(`/transactions/${id}`);
-        loadData();
-      } catch (err) {
-        alert("Silme başarısız.");
-      }
+    setConfirmDeleteId(id);
+  };
+
+  const proceedDelete = async () => {
+    if (!confirmDeleteId) return;
+    try {
+      await api.delete(`/transactions/${confirmDeleteId}`);
+      setConfirmDeleteId(null);
+      loadData();
+    } catch (err) {
+      alert("Silme başarısız.");
     }
   };
 
@@ -226,6 +231,33 @@ export default function Transactions({ initialType, settings }: { initialType?: 
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {confirmDeleteId && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-sidebar-bg/60 backdrop-blur-sm" onClick={() => setConfirmDeleteId(null)}></div>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 overflow-hidden flex flex-col relative animate-in zoom-in-95 duration-200">
+            <h3 className="font-bold text-gray-900 mb-2">İşlemi Sil</h3>
+            <p className="text-gray-600 mb-6 font-medium text-sm">
+              Bu işlemi silmek istediğinize emin misiniz? Bu işlem geri alınamaz.
+            </p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setConfirmDeleteId(null)}
+                className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors"
+              >
+                Vazgeç
+              </button>
+              <button 
+                onClick={proceedDelete}
+                className="flex-1 py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-colors shadow-lg shadow-red-200"
+              >
+                Evet, Sil
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Modal */}
       {showAdd && (

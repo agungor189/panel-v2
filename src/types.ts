@@ -69,6 +69,9 @@ export interface DashboardMetrics {
   totalExpenses: number;
   netProfit: number;
   lowStockCount: number;
+  totalStockSalesValue: number;
+  totalStockCostValue: number;
+  totalBufferedCostValue: number;
   totalActivities?: number;
   totalChangedValues?: number;
 }

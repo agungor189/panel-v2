@@ -32,16 +32,26 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
   };
 
   const handleAddItem = (product: any) => {
+    if (product.total_stock <= 0) {
+      alert("Bu ürünün stoğu bitmiş, eklenemez.");
+      return;
+    }
     setSelectedItems(prev => {
       const exists = prev.find(p => p.product_id === product.id);
       if (exists) {
+        if (exists.quantity >= product.total_stock) {
+           alert("Maksimum stok sınırına ulaştınız.");
+           return prev;
+        }
         return prev.map(p => p.product_id === product.id ? { ...p, quantity: p.quantity + 1 } : p);
       }
       return [...prev, {
         product_id: product.id,
         product_name: product.name || product.title,
         quantity: 1,
-        weight_per_unit: product.weight || 0
+        weight_per_unit: product.weight || 0,
+        sale_price: product.sale_price || 0,
+        total_stock: product.total_stock || 0
       }];
     });
     setSearchQuery('');
@@ -49,7 +59,16 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
 
   const updateItemQuantity = (id: string, qty: number) => {
     if (qty < 1) return;
-    setSelectedItems(prev => prev.map(p => p.product_id === id ? { ...p, quantity: qty } : p));
+    setSelectedItems(prev => prev.map(p => {
+      if (p.product_id === id) {
+        if (qty > p.total_stock) {
+          alert(`En fazla mevcut stok kadar (${p.total_stock}) girebilirsiniz.`);
+          return { ...p, quantity: p.total_stock };
+        }
+        return { ...p, quantity: qty };
+      }
+      return p;
+    }));
   };
 
   const updateItemWeight = (id: string, weight: number) => {
@@ -68,27 +87,41 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
 
   const totalQuantity = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
   const totalWeight = selectedItems.reduce((sum, item) => sum + (item.weight_per_unit * item.quantity), 0);
+  const totalAmount = selectedItems.reduce((sum, item) => sum + (item.sale_price * item.quantity), 0);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedItems.length === 0) return alert('Lütfen en az bir ürün ekleyin.');
     
+    // Additional validation check just in case
+    for (const item of selectedItems) {
+      if (item.quantity > item.total_stock) {
+        return alert(`Yetersiz stok: ${item.product_name} için mevcut stok ${item.total_stock} adet. Lütfen miktarı düşürün.`);
+      }
+    }
+    
     setSaving(true);
     try {
-      await api.post('/sales', {
+      const response = await api.post('/sales', {
         ...formData,
         total_quantity: totalQuantity,
         total_weight: totalWeight,
-        total_amount: 0,
+        total_amount: totalAmount,
         items: selectedItems.map(item => ({
           ...item,
-          weight: item.weight_per_unit * item.quantity
+          weight: item.weight_per_unit * item.quantity,
+          price: item.sale_price
         }))
       });
-      onBack();
-    } catch (err) {
+      if (response.success === false) {
+        alert(response.error || 'Satış oluşturulurken bir hata oluştu');
+      } else {
+        alert(response.message || 'Satış başarıyla kaydedildi.');
+        onBack();
+      }
+    } catch (err: any) {
       console.error(err);
-      alert('Satış eklenirken hata oluştu');
+      alert(err.response?.data?.error || err.message || 'Satış eklenirken hata oluştu');
     } finally {
       setSaving(false);
     }
@@ -216,13 +249,22 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
                           <button
                             type="button"
                             onClick={() => handleAddItem(p)}
-                            className="w-full text-left px-4 py-3 hover:bg-bg-main flex items-center justify-between transition-colors"
+                            disabled={p.total_stock <= 0}
+                            className={`w-full text-left px-4 py-3 flex items-center justify-between transition-colors ${p.total_stock <= 0 ? 'bg-gray-50 opacity-60 cursor-not-allowed' : 'hover:bg-bg-main'}`}
                           >
                             <div>
-                              <div className="font-bold text-sm text-text-main">{p.name || p.title}</div>
-                              {p.sku && <div className="text-xs text-text-muted mt-0.5">SKU: {p.sku}</div>}
+                              <div className="font-bold text-sm text-text-main flex items-center gap-2">
+                                {p.name || p.title}
+                                {p.total_stock <= 0 && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded uppercase font-bold">Stok Yok</span>}
+                                {p.total_stock > 0 && p.total_stock <= 10 && <span className="text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded uppercase font-bold">Son {p.total_stock}</span>}
+                              </div>
+                              <div className="text-xs text-text-muted mt-1 flex items-center gap-3">
+                                {p.sku && <span>SKU: {p.sku}</span>}
+                                <span className={p.total_stock > 0 ? "font-semibold text-primary" : "text-gray-400"}>Stok: {p.total_stock || 0}</span>
+                                <span className="font-bold text-gray-700">{p.sale_price ? p.sale_price.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' }) : '0,00 ₺'}</span>
+                              </div>
                             </div>
-                            <Plus className="w-5 h-5 text-primary" />
+                            {p.total_stock > 0 && <Plus className="w-5 h-5 text-primary" />}
                           </button>
                         </li>
                       ))}
@@ -241,37 +283,35 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
                     <thead className="bg-gray-100/50 text-gray-500 font-bold text-xs uppercase tracking-wider">
                       <tr>
                         <th className="px-4 py-3">Ürün</th>
+                        <th className="px-4 py-3 w-32 text-center">Birim Fiyat</th>
                         <th className="px-4 py-3 w-32 text-center">Adet</th>
-                        <th className="px-4 py-3 w-40 text-center">Birim Ağırlık (kg)</th>
-                        <th className="px-4 py-3 w-32 text-center">Toplam (kg)</th>
+                        <th className="px-4 py-3 w-32 text-center">Toplam Fiyat</th>
                         <th className="px-4 py-3 w-16"></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white">
                       {selectedItems.map((item) => (
                         <tr key={item.product_id} className="hover:bg-gray-50/50">
-                          <td className="px-4 py-3 font-bold text-text-main">{item.product_name}</td>
+                          <td className="px-4 py-3">
+                            <div className="font-bold text-text-main">{item.product_name}</div>
+                            <div className="text-[10px] text-text-muted mt-0.5">Stok: {item.total_stock}</div>
+                          </td>
+                          <td className="px-4 py-3 text-center text-gray-600 font-medium">
+                            {item.sale_price.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })}
+                          </td>
                           <td className="px-4 py-3">
                             <input 
                               type="number" 
                               min="1"
+                              max={item.total_stock}
                               value={item.quantity}
                               onChange={(e) => updateItemQuantity(item.product_id, parseInt(e.target.value) || 1)}
-                              className="w-full text-center border-gray-300 rounded-lg py-1.5 focus:ring-1 focus:ring-primary focus:outline-none"
+                              className={`w-full text-center border-gray-300 rounded-lg py-1.5 focus:ring-1 focus:ring-primary focus:outline-none ${item.quantity > item.total_stock ? 'border-red-500 bg-red-50 text-red-700' : ''}`}
                             />
-                          </td>
-                          <td className="px-4 py-3">
-                            <input 
-                              type="number"
-                              step="0.01" 
-                              min="0"
-                              value={item.weight_per_unit}
-                              onChange={(e) => updateItemWeight(item.product_id, parseFloat(e.target.value) || 0)}
-                              className="w-full text-center border-gray-300 rounded-lg py-1.5 focus:ring-1 focus:ring-primary focus:outline-none"
-                            />
+                            {item.quantity > item.total_stock && <div className="text-[9px] text-red-500 text-center mt-1">Yetersiz Stok</div>}
                           </td>
                           <td className="px-4 py-3 text-center font-bold text-primary">
-                            {(item.weight_per_unit * item.quantity).toFixed(2)}
+                            {(item.sale_price * item.quantity).toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })}
                           </td>
                           <td className="px-4 py-3 text-right">
                             <button type="button" onClick={() => removeItem(item.product_id)} className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-colors">
@@ -294,8 +334,8 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
                   <div className="text-3xl font-black text-gray-800">{totalQuantity} <span className="text-lg text-gray-500 font-semibold">adet</span></div>
                 </div>
                 <div className="flex flex-col items-center sm:items-end">
-                  <div className="text-sm font-bold text-primary uppercase tracking-wider">Toplam Kargo Ağırlığı</div>
-                  <div className="text-3xl font-black text-primary">{totalWeight.toFixed(2)} <span className="text-lg text-primary/70 font-semibold">kg</span></div>
+                  <div className="text-sm font-bold text-primary uppercase tracking-wider">Sipariş Toplam Tutarı</div>
+                  <div className="text-4xl font-black text-primary">{totalAmount.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })}</div>
                 </div>
               </div>
             )}
@@ -305,7 +345,11 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
              <button type="button" onClick={onBack} className="px-6 py-3 font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors">
                İptal
              </button>
-             <button disabled={saving} type="submit" className="px-8 py-3 font-bold text-white bg-primary hover:bg-primary-hover rounded-xl shadow-md transition-all disabled:opacity-50">
+             <button 
+               disabled={saving || selectedItems.some(i => i.quantity > i.total_stock) || selectedItems.length === 0} 
+               type="submit" 
+               className="px-8 py-3 font-bold text-white bg-primary hover:bg-primary-hover rounded-xl shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+             >
                {saving ? 'Kaydediliyor...' : 'Satışı Kaydet'}
              </button>
           </div>

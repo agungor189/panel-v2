@@ -40,7 +40,7 @@ export default function SalesList() {
               <th className="px-6 py-4">Müşteri</th>
               <th className="px-6 py-4">Kargo Firması</th>
               <th className="px-6 py-4 text-center">Toplam Adet</th>
-              <th className="px-6 py-4 text-center">Toplam Ağırlık</th>
+              <th className="px-6 py-4 text-center">Toplam Tutar</th>
               <th className="px-6 py-4">Tarih</th>
               <th className="px-6 py-4">Durum</th>
             </tr>
@@ -65,7 +65,7 @@ export default function SalesList() {
                 </td>
                 <td className="px-6 py-4 text-center">
                   <span className="font-bold text-primary bg-primary/10 px-3 py-1 rounded-lg">
-                    {sale.total_weight ? sale.total_weight.toFixed(2) : 0} kg
+                    {sale.total_amount ? sale.total_amount.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' }) : '0,00 ₺'}
                   </span>
                 </td>
                 <td className="px-6 py-4 font-mono text-xs text-text-muted">
