@@ -13,7 +13,8 @@ import {
   FileText,
   DollarSign
 } from 'lucide-react';
-import { api, formatCurrency } from '../lib/api';
+import { api } from '../lib/api';
+import { useCurrency } from '../CurrencyContext';
 import { RecurringPayment, Settings, Transaction } from '../types';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -23,6 +24,7 @@ function cn(...inputs: ClassValue[]) {
 }
 
 export default function RecurringPayments({ settings }: { settings: Settings | null }) {
+  const { FormatAmount } = useCurrency();
   const [items, setItems] = useState<RecurringPayment[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -229,7 +231,7 @@ export default function RecurringPayments({ settings }: { settings: Settings | n
                       {d.payments && d.payments.length > 0 && (
                         <div className="text-right">
                           <p className="text-[10px] font-black text-primary bg-primary/5 px-2 py-0.5 rounded-full">
-                            {formatCurrency(d.payments.reduce((sum: number, p: any) => sum + p.amount, 0))}
+                            <FormatAmount amount={d.payments.reduce((sum: number, p: any) => sum + p.amount, 0)} />
                           </p>
                         </div>
                       )}
@@ -248,7 +250,7 @@ export default function RecurringPayments({ settings }: { settings: Settings | n
                          >
                             <span className="truncate leading-tight mb-0.5" title={p.title}>{p.title}</span>
                             <div className="flex justify-between items-center mt-1">
-                               <span className="font-black text-[11px]">{formatCurrency(p.amount)}</span>
+                               <span className="font-black text-[11px]"><FormatAmount amount={p.amount} /></span>
                                {p.processed && <CheckCircle2 className="w-3 h-3" />}
                             </div>
                          </div>
@@ -267,12 +269,12 @@ export default function RecurringPayments({ settings }: { settings: Settings | n
            <div className="card p-6 bg-primary text-white border-none shadow-xl relative overflow-hidden">
               <div className="relative z-10 space-y-4">
                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">{monthInfo.monthName} Toplam</p>
-                 <h4 className="text-3xl font-black">{formatCurrency(items.reduce((sum, p) => sum + p.amount, 0))}</h4>
+                 <h4 className="text-3xl font-black"><FormatAmount amount={items.reduce((sum, p) => sum + p.amount, 0)} /></h4>
                  <div className="pt-2">
-                    <p className="text-[10px] font-bold opacity-70">Ödenen: {formatCurrency(
+                    <p className="text-[10px] font-bold opacity-70">Ödenen: <FormatAmount amount={
                        txs.filter(t => t.recurring_id && new Date(t.date).getMonth() === viewDate.getMonth() && new Date(t.date).getFullYear() === viewDate.getFullYear())
                            .reduce((sum, t) => sum + t.amount, 0)
-                    )}</p>
+                    } /></p>
                  </div>
               </div>
               <CalendarIcon className="absolute -bottom-4 -right-4 w-24 h-24 text-white/10 rotate-12" />
@@ -295,7 +297,8 @@ export default function RecurringPayments({ settings }: { settings: Settings | n
               <span className="text-xs font-bold text-text-muted">{items.length} Plan Kayıtlı</span>
            </div>
            <div className="card overflow-hidden">
-             <table className="w-full text-left text-sm">
+             <div className="overflow-x-auto">
+               <table className="w-full text-left text-sm min-w-[800px]">
                 <thead>
                   <tr className="bg-bg-main border-b border-border-color text-[10px] font-black text-text-muted uppercase tracking-widest">
                     <th className="px-6 py-4">Gün</th>
@@ -321,7 +324,7 @@ export default function RecurringPayments({ settings }: { settings: Settings | n
                         {item.note && <p className="text-[10px] text-text-muted mt-0.5">{item.note}</p>}
                       </td>
                       <td className="px-6 py-4 font-black text-text-main text-right">
-                        {formatCurrency(item.amount)}
+                        <FormatAmount amount={item.amount} />
                       </td>
                       <td className="px-6 py-4 text-right">
                         <button 
@@ -340,6 +343,7 @@ export default function RecurringPayments({ settings }: { settings: Settings | n
                   )}
                 </tbody>
              </table>
+             </div>
            </div>
         </div>
       </div>

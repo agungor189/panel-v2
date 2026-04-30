@@ -9,18 +9,43 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
     customer_address: '',
     shipping_company: '',
     tracking_number: '',
+    platform: 'Satış Sistemi',
+    commission_rate: 0,
+    shipping_cost: 0,
+    discount: 0,
+    cash_account_id: ''
   });
 
   const [products, setProducts] = useState<any[]>([]);
+  const [cashAccounts, setCashAccounts] = useState<any[]>([]);
+  const [settings, setSettings] = useState<any>({});
   const [searchQuery, setSearchQuery] = useState('');
   
-  const [selectedItems, setSelectedItems] = useState<any[]>([]); // { product_id, product_name, quantity, weight_per_unit }
+  const [selectedItems, setSelectedItems] = useState<any[]>([]); // { product_id, product_name, quantity, weight_per_unit, sale_price }
   
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     loadProducts();
+    loadSettings();
+    api.get('/cash-accounts').then(setCashAccounts).catch(console.error);
   }, []);
+
+  const loadSettings = async () => {
+    try {
+      const data = await api.get('/settings');
+      const settingsObj = data.reduce((acc: any, curr: any) => ({ ...acc, [curr.key]: curr.value }), {});
+      setSettings(settingsObj);
+      if (settingsObj.commission_rates) {
+        try {
+          const rates = JSON.parse(settingsObj.commission_rates);
+          if (rates['Satış Sistemi']) setFormData(prev => ({ ...prev, commission_rate: rates['Satış Sistemi'] }));
+        } catch(e) {}
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const loadProducts = async () => {
     try {
@@ -29,6 +54,17 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handlePlatformChange = (platform: string) => {
+    let rate = 0;
+    if (settings.commission_rates) {
+      try {
+        const rates = JSON.parse(settings.commission_rates);
+        if (rates[platform] !== undefined) rate = rates[platform];
+      } catch(e) {}
+    }
+    setFormData(prev => ({ ...prev, platform, commission_rate: rate }));
   };
 
   const handleAddItem = (product: any) => {
@@ -62,8 +98,8 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
     setSelectedItems(prev => prev.map(p => {
       if (p.product_id === id) {
         if (qty > p.total_stock) {
-          alert(`En fazla mevcut stok kadar (${p.total_stock}) girebilirsiniz.`);
-          return { ...p, quantity: p.total_stock };
+           alert(`En fazla mevcut stok kadar (${p.total_stock}) girebilirsiniz.`);
+           return { ...p, quantity: p.total_stock };
         }
         return { ...p, quantity: qty };
       }
@@ -71,6 +107,10 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
     }));
   };
 
+  const updateItemPrice = (id: string, price: number) => {
+    setSelectedItems(prev => prev.map(p => p.product_id === id ? { ...p, sale_price: price } : p));
+  };
+  
   const updateItemWeight = (id: string, weight: number) => {
     setSelectedItems(prev => prev.map(p => p.product_id === id ? { ...p, weight_per_unit: weight } : p));
   };
@@ -87,7 +127,7 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
 
   const totalQuantity = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
   const totalWeight = selectedItems.reduce((sum, item) => sum + (item.weight_per_unit * item.quantity), 0);
-  const totalAmount = selectedItems.reduce((sum, item) => sum + (item.sale_price * item.quantity), 0);
+  const totalAmount = selectedItems.reduce((sum, item) => sum + (parseFloat(item.sale_price) * item.quantity), 0);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,7 +150,7 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
         items: selectedItems.map(item => ({
           ...item,
           weight: item.weight_per_unit * item.quantity,
-          price: item.sale_price
+          price: parseFloat(item.sale_price)
         }))
       });
       if (response.success === false) {
@@ -220,6 +260,75 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
             </div>
           </div>
 
+          {/* FİNANS VE PLATFORM BİLGİLERİ */}
+          <div>
+            <h3 className="text-sm font-bold text-primary uppercase tracking-wider mb-4 flex items-center gap-2">
+              <Hash className="w-4 h-4" /> Satış Kanalı ve Finans
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Platform / Satış Kanalı</label>
+                <select
+                  value={formData.platform}
+                  onChange={e => handlePlatformChange(e.target.value)}
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-semibold outline-none focus:ring-2 focus:border-primary"
+                >
+                  <option value="Satış Sistemi">Satış Sistemi (Fiziksel/Manual)</option>
+                  {settings.commission_rates && Object.keys(JSON.parse(settings.commission_rates)).map(k => (
+                     <option key={k} value={k}>{k}</option>
+                  ))}
+                </select>
+              </div>
+              {!['Trendyol', 'Hepsiburada', 'Amazon', 'N11'].includes(formData.platform) && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">Kasa Hesabı (Giriş)</label>
+                  <select
+                    required
+                    value={formData.cash_account_id}
+                    onChange={e => setFormData({...formData, cash_account_id: e.target.value})}
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-semibold outline-none focus:ring-2 focus:border-primary"
+                  >
+                    <option value="">Seçiniz...</option>
+                    {cashAccounts.map(a => <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>)}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Komisyon Oranı (%)</label>
+                <input 
+                  type="number" 
+                  step="0.1"
+                  min="0"
+                  value={formData.commission_rate}
+                  onChange={e => setFormData({...formData, commission_rate: parseFloat(e.target.value) || 0})}
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-semibold outline-none focus:ring-2 focus:border-primary"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Kargo Maliyeti (₺)</label>
+                <input 
+                  type="number" 
+                  step="0.1"
+                  min="0"
+                  value={formData.shipping_cost}
+                  onChange={e => setFormData({...formData, shipping_cost: parseFloat(e.target.value) || 0})}
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-semibold outline-none focus:ring-2 focus:border-primary"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">İndirim Tutarı (₺)</label>
+                <input 
+                  type="number" 
+                  step="0.1"
+                  min="0"
+                  value={formData.discount}
+                  onChange={e => setFormData({...formData, discount: parseFloat(e.target.value) || 0})}
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-semibold outline-none focus:ring-2 focus:border-primary"
+                />
+              </div>
+            </div>
+          </div>
+
           {/* SİPARİŞ İÇERİĞİ (ÜRÜNLER) */}
           <div>
             <h3 className="text-sm font-bold text-primary uppercase tracking-wider mb-4 flex items-center gap-2">
@@ -279,7 +388,7 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
             {selectedItems.length > 0 && (
               <div className="bg-bg-main border border-border-color rounded-2xl overflow-hidden">
                 <div className="overflow-x-auto">
-                   <table className="w-full text-sm text-left">
+                   <table className="w-full text-sm text-left min-w-[800px]">
                     <thead className="bg-gray-100/50 text-gray-500 font-bold text-xs uppercase tracking-wider">
                       <tr>
                         <th className="px-4 py-3">Ürün</th>
@@ -296,8 +405,17 @@ export default function SalesForm({ onBack }: { onBack: () => void }) {
                             <div className="font-bold text-text-main">{item.product_name}</div>
                             <div className="text-[10px] text-text-muted mt-0.5">Stok: {item.total_stock}</div>
                           </td>
-                          <td className="px-4 py-3 text-center text-gray-600 font-medium">
-                            {item.sale_price.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })}
+                          <td className="px-4 py-3 text-center">
+                            <div className="relative">
+                              <input 
+                                type="number" 
+                                min="0"
+                                step="0.01"
+                                value={item.sale_price}
+                                onChange={(e) => updateItemPrice(item.product_id, parseFloat(e.target.value) || 0)}
+                                className="w-24 text-center border-gray-300 rounded-lg py-1.5 focus:ring-1 focus:ring-primary focus:outline-none"
+                              />
+                            </div>
                           </td>
                           <td className="px-4 py-3">
                             <input 

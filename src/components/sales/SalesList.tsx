@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../lib/api';
 import { Package, Truck, User } from 'lucide-react';
+import { useCurrency } from '../../CurrencyContext';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -9,6 +10,7 @@ function cn(...inputs: ClassValue[]) {
 }
 
 export default function SalesList() {
+  const { FormatAmount } = useCurrency();
   const [sales, setSales] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -34,11 +36,13 @@ export default function SalesList() {
   return (
     <div className="bg-white rounded-3xl shadow-lg border border-border-color overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full text-sm text-left">
+        <table className="w-full text-sm text-left min-w-[1000px]">
           <thead className="bg-bg-main/50 text-text-muted font-bold text-[11px] uppercase tracking-wider">
             <tr>
               <th className="px-6 py-4">Müşteri</th>
               <th className="px-6 py-4">Kargo Firması</th>
+              <th className="px-6 py-4 text-center">Platform</th>
+              <th className="px-6 py-4 text-center">Net Kar</th>
               <th className="px-6 py-4 text-center">Toplam Adet</th>
               <th className="px-6 py-4 text-center">Toplam Tutar</th>
               <th className="px-6 py-4">Tarih</th>
@@ -61,11 +65,22 @@ export default function SalesList() {
                   {sale.tracking_number && <div className="text-xs text-primary mt-1">{sale.tracking_number}</div>}
                 </td>
                 <td className="px-6 py-4 text-center font-bold text-gray-800">
+                  {sale.platform || 'Satış Sistemi'}
+                </td>
+                <td className="px-6 py-4 text-center">
+                  <span className={cn(
+                    "font-bold px-3 py-1 rounded-lg",
+                    sale.net_profit > 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                  )}>
+                    {sale.net_profit ? <FormatAmount amount={sale.net_profit} exchangeRateAtTransaction={sale.exchange_rate_at_transaction} /> : '0,00 ₺'}
+                  </span>
+                </td>
+                <td className="px-6 py-4 text-center font-bold text-gray-800">
                   {sale.total_quantity}
                 </td>
                 <td className="px-6 py-4 text-center">
                   <span className="font-bold text-primary bg-primary/10 px-3 py-1 rounded-lg">
-                    {sale.total_amount ? sale.total_amount.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' }) : '0,00 ₺'}
+                    {sale.total_amount ? <FormatAmount amount={sale.total_amount} exchangeRateAtTransaction={sale.exchange_rate_at_transaction} /> : '0,00 ₺'}
                   </span>
                 </td>
                 <td className="px-6 py-4 font-mono text-xs text-text-muted">

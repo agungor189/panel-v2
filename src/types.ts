@@ -47,6 +47,7 @@ export interface Transaction {
   category: string;
   platform: string;
   amount: number;
+  exchange_rate_at_transaction?: number;
   product_id?: string;
   product_title?: string;
   note: string;
@@ -89,8 +90,21 @@ export interface DashboardMetrics {
   totalStockSalesValue: number;
   totalStockCostValue: number;
   totalBufferedCostValue: number;
+  cashTotal?: number;
+  pendingPlatform?: number;
+  monthlyCashIn?: number;
+  monthlyCashOut?: number;
   totalActivities?: number;
   totalChangedValues?: number;
+}
+
+export interface DashboardWidget {
+  id: string;
+  widget_type: string;
+  position: number;
+  is_visible: boolean;
+  size: number;
+  settings: any;
 }
 
 export interface ApiKey {
@@ -136,6 +150,7 @@ export interface Settings {
   language: string;
   usd_exchange_rate: number;
   default_buffer_percentage: number;
+  default_profit_percentage?: string | number;
   api_key?: string;
   commission_rates: Record<string, number>;
   product_categories: string[];

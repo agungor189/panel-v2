@@ -346,6 +346,18 @@ try { db.exec("ALTER TABLE transactions ADD COLUMN payment_method TEXT"); } catc
 try { db.exec("ALTER TABLE transactions ADD COLUMN supplier TEXT"); } catch(e) {}
 try { db.exec("ALTER TABLE transactions ADD COLUMN invoice_number TEXT"); } catch(e) {}
 
+try { db.exec("ALTER TABLE transactions ADD COLUMN expense_type TEXT"); } catch(e) {}
+
+try { db.exec("ALTER TABLE sales ADD COLUMN platform TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE sales ADD COLUMN commission_rate REAL DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE sales ADD COLUMN shipping_cost REAL DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE sales ADD COLUMN discount REAL DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE sales ADD COLUMN net_profit REAL DEFAULT 0"); } catch(e) {}
+
+try { db.exec("ALTER TABLE sale_items ADD COLUMN unit_price REAL DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE sale_items ADD COLUMN purchase_cost REAL DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE sale_items ADD COLUMN net_profit REAL DEFAULT 0"); } catch(e) {}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS expense_attachments (
     id TEXT PRIMARY KEY,
@@ -359,6 +371,110 @@ db.exec(`
   );
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS cash_accounts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    currency TEXT DEFAULT 'TRY',
+    type TEXT,
+    opening_balance REAL DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS cash_transactions (
+    id TEXT PRIMARY KEY,
+    account_id TEXT,
+    type TEXT,
+    amount REAL,
+    currency TEXT,
+    exchange_rate_at_transaction REAL,
+    source_type TEXT,
+    source_id TEXT,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(account_id) REFERENCES cash_accounts(id)
+  );
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS exchange_rates (
+    id TEXT PRIMARY KEY,
+    base_currency TEXT NOT NULL,
+    target_currency TEXT NOT NULL,
+    rate REAL NOT NULL,
+    source TEXT,
+    fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    is_active INTEGER DEFAULT 1
+  );
+`);
+
+db.exec(`DROP TABLE IF EXISTS dashboard_widgets;`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS dashboard_widgets (
+    id TEXT PRIMARY KEY,
+    user_id TEXT DEFAULT 'admin',
+    widget_type TEXT NOT NULL,
+    data_source TEXT,
+    position_x INTEGER DEFAULT 0,
+    position_y INTEGER DEFAULT 0,
+    width INTEGER DEFAULT 1,
+    height INTEGER DEFAULT 1,
+    priority_level INTEGER DEFAULT 1,
+    is_visible INTEGER DEFAULT 1,
+    config TEXT DEFAULT '{}'
+  );
+`);
+
+const widgetsCount = db.prepare("SELECT COUNT(*) as count FROM dashboard_widgets").get() as any;
+if (widgetsCount.count === 0) {
+  const insertWidget = db.prepare("INSERT INTO dashboard_widgets (id, user_id, widget_type, position_x, position_y, width, height, priority_level, is_visible, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+  
+  // Top KPIs (width 4 in a 12 col grid)
+  insertWidget.run(uuidv4(), 'admin', 'total_revenue', 0, 0, 4, 3, 3, 1, '{}');
+  insertWidget.run(uuidv4(), 'admin', 'total_expense', 4, 0, 4, 3, 3, 1, '{}');
+  insertWidget.run(uuidv4(), 'admin', 'net_profit',   8, 0, 4, 3, 3, 1, '{}');
+  
+  // Row 2
+  insertWidget.run(uuidv4(), 'admin', 'critical_stock', 0, 3, 4, 3, 2, 1, '{}');
+  insertWidget.run(uuidv4(), 'admin', 'total_stock_value', 4, 3, 4, 3, 2, 1, '{}');
+  insertWidget.run(uuidv4(), 'admin', 'total_stock_cost', 8, 3, 4, 3, 2, 1, '{}');
+  
+  // Row 3
+  insertWidget.run(uuidv4(), 'admin', 'est_gross_profit', 0, 6, 4, 3, 2, 1, '{}');
+  insertWidget.run(uuidv4(), 'admin', 'avg_profit_margin', 4, 6, 4, 3, 2, 1, '{}');
+
+  // Charts
+  insertWidget.run(uuidv4(), 'admin', 'financial_trend', 0, 9, 6, 7, 3, 1, '{}');
+  insertWidget.run(uuidv4(), 'admin', 'platform_sales', 6, 9, 6, 7, 3, 1, '{}');
+  
+  // Lists
+  insertWidget.run(uuidv4(), 'admin', 'recent_transactions', 0, 16, 6, 8, 2, 1, '{}');
+  insertWidget.run(uuidv4(), 'admin', 'low_stock_list', 6, 16, 6, 8, 2, 1, '{}');
+}
+
+try { db.exec("ALTER TABLE sales ADD COLUMN exchange_rate_at_transaction REAL DEFAULT 1"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN exchange_rate_at_transaction REAL DEFAULT 1"); } catch(e) {}
+
+// Default settings
+try { db.exec("ALTER TABLE transactions ADD COLUMN cash_account_id TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE sales ADD COLUMN cash_account_id TEXT"); } catch(e) {}
+
+// Seed default cash accounts if empty
+const accountsCount = db.prepare("SELECT COUNT(*) as count FROM cash_accounts").get() as any;
+if (accountsCount.count === 0) {
+  const insertAccount = db.prepare("INSERT INTO cash_accounts (id, name, currency, type) VALUES (?, ?, ?, ?)");
+  insertAccount.run(uuidv4(), "Nakit TL", "TRY", "cash");
+  insertAccount.run(uuidv4(), "Banka TL", "TRY", "bank");
+  insertAccount.run(uuidv4(), "USD Kasa", "USD", "cash");
+  insertAccount.run(uuidv4(), "Trendyol Bekleyen", "TRY", "platform");
+  insertAccount.run(uuidv4(), "Hepsiburada Bekleyen", "TRY", "platform");
+  insertAccount.run(uuidv4(), "Amazon Bekleyen", "TRY", "platform");
+}
+
 // Default settings
 const insertSetting = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
 insertSetting.run("company_name", "DSDST Panel");
@@ -368,6 +484,7 @@ insertSetting.run("currency_symbol", "₺");
 insertSetting.run("language", "tr");
 insertSetting.run("usd_exchange_rate", "32.5");
 insertSetting.run("default_buffer_percentage", "20");
+insertSetting.run("default_profit_percentage", "30");
 insertSetting.run("api_key", uuidv4());
 insertSetting.run("commission_rates", JSON.stringify({
   "Trendyol": 15,
@@ -432,6 +549,65 @@ function logActivity(action: string, entity_type: string, entity_id: string, det
   }
 }
 
+// -- EXCHANGE RATES LOGIC --
+async function fetchExchangeRate() {
+  let rate = 0;
+  let source = '';
+  
+  try {
+    // Primary: TCMB
+    const tcmbRes = await fetch("https://www.tcmb.gov.tr/kurlar/today.xml");
+    if (tcmbRes.ok) {
+       const text = await tcmbRes.text();
+       const match = text.match(/<Currency[^>]*Kod="USD"[\s\S]*?<ForexSelling>(.*?)<\/ForexSelling>/);
+       if (match && match[1]) {
+          rate = parseFloat(match[1]);
+          source = 'TCMB';
+       }
+    }
+    
+    // Backup (exchangerate-api)
+    if (!rate || rate <= 0) {
+      const backupRes = await fetch("https://open.er-api.com/v6/latest/USD");
+      if (backupRes.ok) {
+         const data = await backupRes.json();
+         if (data?.rates?.TRY) {
+            rate = data.rates.TRY;
+            source = 'open.er-api.com';
+         }
+      }
+    }
+
+    if (rate > 0) {
+       db.prepare(`UPDATE exchange_rates SET is_active = 0 WHERE is_active = 1`).run();
+       db.prepare(`
+         INSERT INTO exchange_rates (id, base_currency, target_currency, rate, source, is_active)
+         VALUES (?, 'USD', 'TRY', ?, ?, 1)
+       `).run(uuidv4(), rate, source);
+       console.log(`[ExchangeRate] Successfully fetched ${rate} from ${source}`);
+       
+       logActivity('CREATE', 'setting', 'exchange_rate', { details: `Kur güncellendi: ${rate} (Kaynak: ${source})` });
+       return true;
+    }
+  } catch (err: any) {
+    console.error(`[ExchangeRate Error] ${err.message}`);
+    logActivity('CREATE', 'setting', 'exchange_rate_error', { details: `Kur güncellenemedi: ${err.message}` });
+  }
+  return false;
+}
+
+// Initial fetch on startup
+setTimeout(fetchExchangeRate, 2000);
+// Fetch daily (86400000 ms)
+setInterval(fetchExchangeRate, 86400000);
+
+export function getActiveExchangeRate() {
+   const row = db.prepare("SELECT * FROM exchange_rates WHERE is_active = 1 ORDER BY fetched_at DESC LIMIT 1").get() as any;
+   return row?.rate || 0;
+}
+
+// -- END EXCHANGE RATES LOGIC --
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -491,6 +667,55 @@ async function startServer() {
     }
   });
 
+  // Dashboard Widgets Endpoints
+  app.get("/api/dashboard/widgets", (req, res) => {
+    try {
+      const user_id = req.query.user_id || 'admin';
+      const widgets = db.prepare("SELECT * FROM dashboard_widgets WHERE user_id = ?").all(user_id) as any[];
+      const parsedWidgets = widgets.map(w => ({...w, config: JSON.parse(w.config || '{}')}));
+      res.json(parsedWidgets);
+    } catch(e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/dashboard/widgets", (req, res) => {
+    try {
+      const widgets = req.body;
+      const stmt = db.prepare("UPDATE dashboard_widgets SET position_x = ?, position_y = ?, width = ?, height = ?, priority_level = ?, is_visible = ?, config = ? WHERE id = ?");
+      const transaction = db.transaction((updates) => {
+        for (const w of updates) {
+          stmt.run(w.position_x, w.position_y, w.width, w.height, w.priority_level, w.is_visible, JSON.stringify(w.config || {}), w.id);
+        }
+      });
+      transaction(widgets);
+      res.json({ success: true });
+    } catch(e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/dashboard/widgets", (req, res) => {
+    try {
+      const w = req.body;
+      const id = w.id || uuidv4();
+      const insert = db.prepare("INSERT INTO dashboard_widgets (id, user_id, widget_type, data_source, position_x, position_y, width, height, priority_level, is_visible, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      insert.run(id, w.user_id || 'admin', w.widget_type, w.data_source || null, w.position_x||0, w.position_y||0, w.width||1, w.height||1, w.priority_level||1, w.is_visible!==undefined?w.is_visible:1, JSON.stringify(w.config || {}));
+      res.json({ id });
+    } catch(e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/dashboard/widgets/:id", (req, res) => {
+    try {
+      db.prepare("DELETE FROM dashboard_widgets WHERE id = ?").run(req.params.id);
+      res.json({ success: true });
+    } catch(e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Dashboard Summary Endpoint
   app.get("/api/dashboard-summary", (req, res) => {
     try {
@@ -501,9 +726,37 @@ async function startServer() {
       const currentMonthStr = `${year}-${month}`;
 
       // Metrics
-      const revenueResult = db.prepare("SELECT SUM(amount) as total FROM transactions WHERE type = 'Income' AND date >= ?").get(firstDayOfMonth) as any;
+      const revenueResult = db.prepare("SELECT SUM(total_amount) as total FROM sales WHERE created_at >= ?").get(firstDayOfMonth) as any;
+      const salesProfitResult = db.prepare("SELECT SUM(net_profit) as total FROM sales WHERE created_at >= ?").get(firstDayOfMonth) as any;
       const realizedExpensesResult = db.prepare("SELECT SUM(amount) as total FROM transactions WHERE type = 'Expense' AND date >= ?").get(firstDayOfMonth) as any;
+
+      // Cash Metrics
+      // 1. Total Cash Balance
+      const cashAccountsTotal = db.prepare(`
+         SELECT 
+           SUM(
+             opening_balance + 
+             COALESCE((SELECT SUM(amount) FROM cash_transactions WHERE account_id = a.id AND type='IN'), 0) - 
+             COALESCE((SELECT SUM(amount) FROM cash_transactions WHERE account_id = a.id AND type='OUT'), 0)
+           ) as total
+         FROM cash_accounts a
+         WHERE a.type != 'platform'
+      `).get() as any;
       
+      const pendingPlatformTotal = db.prepare(`
+         SELECT 
+           SUM(
+             opening_balance + 
+             COALESCE((SELECT SUM(amount) FROM cash_transactions WHERE account_id = a.id AND type='IN'), 0) - 
+             COALESCE((SELECT SUM(amount) FROM cash_transactions WHERE account_id = a.id AND type='OUT'), 0)
+           ) as total
+         FROM cash_accounts a
+         WHERE a.type = 'platform'
+      `).get() as any;
+
+      const monthlyCashIn = db.prepare("SELECT SUM(amount) as total FROM cash_transactions WHERE type='IN' AND created_at >= ? AND source_type='sale'").get(firstDayOfMonth) as any;
+      const monthlyCashOut = db.prepare("SELECT SUM(amount) as total FROM cash_transactions WHERE type='OUT' AND created_at >= ? AND source_type='expense'").get(firstDayOfMonth) as any;
+
       const activeRecurring = db.prepare("SELECT * FROM recurring_payments WHERE status = 'Active'").all() as any[];
       let pendingRecurringTotal = 0;
       for (const r of activeRecurring) {
@@ -513,6 +766,7 @@ async function startServer() {
       }
 
       const totalRevenue = revenueResult?.total || 0;
+      const salesNetProfit = salesProfitResult?.total || 0;
       const totalExpenses = (realizedExpensesResult?.total || 0) + pendingRecurringTotal;
 
       const lowStockProductsQuery = db.prepare(`
@@ -526,7 +780,7 @@ async function startServer() {
       `).all() as any[];
 
       const allProducts = db.prepare(`
-        SELECT p.id, p.sale_price, p.purchase_price_usd, p.exchange_rate_used, p.buffer_percentage,
+        SELECT p.id, p.purchase_cost, p.sale_price, p.purchase_price_usd, p.exchange_rate_used, p.buffer_percentage,
           COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) as total_stock
         FROM products p
       `).all() as any[];
@@ -537,33 +791,51 @@ async function startServer() {
 
       for (const p of allProducts) {
         totalSaleValue += (p.total_stock * (p.sale_price || 0));
-        const cost = (p.purchase_price_usd || 0) * (p.exchange_rate_used || 0);
-        totalCostValue += (p.total_stock * cost);
-        totalBufferedCostValue += (p.total_stock * cost * (1 + (p.buffer_percentage || 0) / 100));
+        const pc = p.purchase_cost || ((p.purchase_price_usd || 0) * (p.exchange_rate_used || 0));
+        totalCostValue += (p.total_stock * pc);
+        totalBufferedCostValue += (p.total_stock * pc * (1 + (p.buffer_percentage || 0) / 100));
       }
 
       const metrics = {
         totalRevenue,
         totalExpenses,
-        netProfit: totalRevenue - totalExpenses,
+        netProfit: salesNetProfit - totalExpenses,
         lowStockCount: lowStockProductsQuery.length,
         totalStockSalesValue: totalSaleValue,
         totalStockCostValue: totalCostValue,
         totalBufferedCostValue: totalBufferedCostValue,
-        lowStockProducts: lowStockProductsQuery
+        lowStockProducts: lowStockProductsQuery,
+        cashTotal: cashAccountsTotal?.total || 0,
+        pendingPlatform: pendingPlatformTotal?.total || 0,
+        monthlyCashIn: monthlyCashIn?.total || 0,
+        monthlyCashOut: monthlyCashOut?.total || 0
       };
 
       // Charts: 6 Month History
-      const monthlyDataRaw = db.prepare(`
-        SELECT 
-          strftime('%Y-%m', date) as month,
-          SUM(CASE WHEN type = 'Income' THEN amount ELSE 0 END) as income,
-          SUM(CASE WHEN type = 'Expense' THEN amount ELSE 0 END) as expense
-        FROM transactions 
-        GROUP BY month 
-        ORDER BY month DESC 
-        LIMIT 6
+      const monthlyExpenses = db.prepare(`
+        SELECT strftime('%Y-%m', date) as month, SUM(amount) as expense
+        FROM transactions WHERE type = 'Expense' GROUP BY month
       `).all() as any[];
+      const monthlySales = db.prepare(`
+        SELECT strftime('%Y-%m', created_at) as month, SUM(total_amount) as income, SUM(net_profit) as profit
+        FROM sales GROUP BY month
+      `).all() as any[];
+
+      const monthMap: Record<string, { income: number, expense: number, profit: number }> = {};
+      monthlySales.forEach(row => {
+        monthMap[row.month] = { income: row.income, profit: row.profit, expense: 0 };
+      });
+      monthlyExpenses.forEach(row => {
+        if (!monthMap[row.month]) monthMap[row.month] = { income: 0, profit: 0, expense: 0 };
+        monthMap[row.month].expense = row.expense;
+      });
+
+      let monthlyDataRaw = Object.keys(monthMap).map(m => ({
+        month: m,
+        income: monthMap[m].income,
+        expense: monthMap[m].expense,
+        profit: monthMap[m].profit
+      })).sort((a,b) => b.month.localeCompare(a.month)).slice(0, 6);
 
       let monthlyData = [...monthlyDataRaw];
       let foundCurrent = false;
@@ -576,16 +848,15 @@ async function startServer() {
       });
 
       if (!foundCurrent && pendingRecurringTotal > 0) {
-        monthlyData.unshift({ month: currentMonthStr, income: 0, expense: pendingRecurringTotal });
+        monthlyData.unshift({ month: currentMonthStr, income: 0, profit: 0, expense: pendingRecurringTotal });
         if (monthlyData.length > 6) monthlyData.pop();
       }
       monthlyData.reverse();
 
       // Charts: Platform Revenue
       const platformRevenue = db.prepare(`
-        SELECT platform, SUM(amount) as total
-        FROM transactions
-        WHERE type = 'Income'
+        SELECT platform, SUM(total_amount) as total
+        FROM sales
         GROUP BY platform
       `).all();
 
@@ -852,14 +1123,36 @@ async function startServer() {
   });
 
   app.post("/api/expenses", (req, res) => {
-    const { date, category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number } = req.body;
+    const { date, category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number, cash_account_id } = req.body;
     const txId = uuidv4();
-    db.prepare(`
-      INSERT INTO transactions (id, date, type, category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number)
-      VALUES (?, ?, 'Expense', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(txId, date || new Date().toISOString(), category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number);
-    logActivity('CREATE', 'expense', txId, { after: req.body });
-    res.json({ id: txId, success: true });
+    
+    try {
+      db.transaction(() => {
+        if (!cash_account_id) throw new Error("Gider eklerken kasa hesabı seçimi zorunludur.");
+        const account = db.prepare("SELECT * FROM cash_accounts WHERE id = ?").get(cash_account_id) as any;
+        if (!account) throw new Error("Geçersiz kasa hesabı.");
+        if (account.is_active === 0) throw new Error("Seçili kasa hesabı pasif.");
+        if (amount <= 0) throw new Error("Tutar 0'dan büyük olmalıdır.");
+
+        const activeRate = getActiveExchangeRate();
+        if (!activeRate || activeRate <= 0) throw new Error("Güncel döviz kuru bulunamadı. Lütfen ayarlardan kuru yenileyin.");
+
+        db.prepare(`
+          INSERT INTO cash_transactions (id, account_id, type, amount, currency, exchange_rate_at_transaction, source_type, source_id, description)
+          VALUES (?, ?, 'OUT', ?, ?, ?, 'expense', ?, ?)
+        `).run(uuidv4(), cash_account_id, amount, account.currency, activeRate, txId, `Gider: ${category} - ${title || note}`);
+
+        db.prepare(`
+          INSERT INTO transactions (id, date, type, category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number, cash_account_id, exchange_rate_at_transaction)
+          VALUES (?, ?, 'Expense', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(txId, date || new Date().toISOString(), category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number, cash_account_id, activeRate);
+        
+        logActivity('CREATE', 'expense', txId, { after: req.body });
+      })();
+      res.json({ id: txId, success: true });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
   });
 
   app.put("/api/expenses/:id", (req, res) => {
@@ -926,6 +1219,107 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // Cash Management
+  app.get("/api/cash-accounts", (req, res) => {
+    try {
+      const accounts = db.prepare("SELECT * FROM cash_accounts ORDER BY name ASC").all();
+      res.json(accounts);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/cash-accounts", (req, res) => {
+    try {
+      const id = uuidv4();
+      const { name, currency, type, opening_balance } = req.body;
+      db.prepare(`
+        INSERT INTO cash_accounts (id, name, currency, type, opening_balance)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(id, name, currency, type, opening_balance || 0);
+      res.json({ success: true, id });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/cash-accounts/:id", (req, res) => {
+    try {
+      const { is_active } = req.body;
+      db.prepare("UPDATE cash_accounts SET is_active = ? WHERE id = ?").run(is_active ? 1 : 0, req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/cash-transactions", (req, res) => {
+    try {
+      const txs = db.prepare(`
+        SELECT ct.*, ca.name as account_name, ca.currency as account_currency
+        FROM cash_transactions ct
+        LEFT JOIN cash_accounts ca ON ct.account_id = ca.id
+        ORDER BY ct.created_at DESC
+      `).all();
+      res.json(txs);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/cash-transfer", (req, res) => {
+    try {
+      const { from_account_id, to_account_id, amount, rate, description } = req.body;
+      const amountNum = parseFloat(amount);
+      if (amountNum <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
+      if (from_account_id === to_account_id) return res.status(400).json({ error: "Source and target accounts must be different" });
+
+      const fromAccount = db.prepare("SELECT * FROM cash_accounts WHERE id = ? AND is_active = 1").get(from_account_id) as any;
+      const toAccount = db.prepare("SELECT * FROM cash_accounts WHERE id = ? AND is_active = 1").get(to_account_id) as any;
+      if (!fromAccount || !toAccount) return res.status(400).json({ error: "Invalid or inactive accounts" });
+
+      let sourceCurrency = fromAccount.currency;
+      let targetCurrency = toAccount.currency;
+
+      let sourceAmount = amountNum;
+      let targetAmount = amountNum;
+
+      if (sourceCurrency !== targetCurrency) {
+         if (!rate || parseFloat(rate) <= 0) return res.status(400).json({ error: "Exchange rate required for cross-currency transfer" });
+         if (sourceCurrency === 'USD' && targetCurrency === 'TRY') {
+            targetAmount = amountNum * parseFloat(rate);
+         } else if (sourceCurrency === 'TRY' && targetCurrency === 'USD') {
+            targetAmount = amountNum / parseFloat(rate);
+         }
+      }
+
+      db.transaction(() => {
+        const activeRate = getActiveExchangeRate() || 1;
+        const desc = description || `Transfer: ${fromAccount.name} -> ${toAccount.name}`;
+        const sourceTxId = uuidv4();
+        const targetTxId = uuidv4();
+
+        // OUT from source
+        db.prepare(`
+          INSERT INTO cash_transactions (id, account_id, type, amount, currency, exchange_rate_at_transaction, source_type, source_id, description)
+          VALUES (?, ?, 'OUT', ?, ?, ?, 'transfer', ?, ?)
+        `).run(sourceTxId, from_account_id, sourceAmount, sourceCurrency, parseFloat(rate) || activeRate, targetTxId, desc);
+
+        // IN to target
+        db.prepare(`
+          INSERT INTO cash_transactions (id, account_id, type, amount, currency, exchange_rate_at_transaction, source_type, source_id, description)
+          VALUES (?, ?, 'IN', ?, ?, ?, 'transfer', ?, ?)
+        `).run(targetTxId, to_account_id, targetAmount, targetCurrency, parseFloat(rate) || activeRate, sourceTxId, desc);
+        
+        logActivity('CREATE', 'cash_transfer', sourceTxId, { after: { from_account_id, to_account_id, amount, rate } });
+      })();
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Transactions CRUD
   app.get("/api/transactions", (req, res) => {
     const transactions = db.prepare(`
@@ -938,17 +1332,40 @@ async function startServer() {
   });
 
   app.post("/api/transactions", (req, res) => {
-    const { date, type, category, platform, amount, product_id, note, reference_number } = req.body;
+    const { date, type, category, platform, amount, product_id, note, reference_number, supplier, invoice_number, expense_type, cash_account_id } = req.body;
     const txId = uuidv4();
-    db.prepare(`
-      INSERT INTO transactions (id, date, type, category, platform, amount, product_id, note, reference_number)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(txId, date || new Date().toISOString(), type, category, platform, amount, product_id, note, reference_number);
-    logActivity('CREATE', 'transaction', txId, { 
-      before: {}, 
-      after: { date: date || new Date().toISOString(), type, category, platform, amount, product_id, note, reference_number }
-    });
-    res.json({ success: true });
+    try {
+       db.transaction(() => {
+          const activeRate = getActiveExchangeRate();
+          if (!activeRate || activeRate <= 0) throw new Error("Güncel döviz kuru bulunamadı. Lütfen ayarlardan kuru yenileyin.");
+
+          if (type === 'Expense') {
+            if (!cash_account_id) throw new Error("Gider eklerken kasa hesabı seçimi zorunludur.");
+            const account = db.prepare("SELECT * FROM cash_accounts WHERE id = ?").get(cash_account_id) as any;
+            if (!account) throw new Error("Geçersiz kasa hesabı.");
+            if (account.is_active === 0) throw new Error("Seçili kasa hesabı pasif.");
+            if (amount <= 0) throw new Error("Tutar 0'dan büyük olmalıdır.");
+
+            db.prepare(`
+              INSERT INTO cash_transactions (id, account_id, type, amount, currency, exchange_rate_at_transaction, source_type, source_id, description)
+              VALUES (?, ?, 'OUT', ?, ?, ?, 'expense', ?, ?)
+            `).run(uuidv4(), cash_account_id, amount, account.currency, activeRate, txId, `Gider: ${category} - ${note}`);
+          }
+
+          db.prepare(`
+            INSERT INTO transactions (id, date, type, category, platform, amount, product_id, note, reference_number, supplier, invoice_number, expense_type, cash_account_id, exchange_rate_at_transaction)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(txId, date || new Date().toISOString(), type, category, platform, amount, product_id, note, reference_number, supplier, invoice_number, expense_type, cash_account_id, activeRate);
+          
+          logActivity('CREATE', 'transaction', txId, { 
+            before: {}, 
+            after: { date: date || new Date().toISOString(), type, category, platform, amount, product_id, note, reference_number, cash_account_id }
+          });
+       })();
+       res.json({ success: true, id: txId });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
   });
 
   app.delete("/api/transactions/:id", (req, res) => {
@@ -1014,6 +1431,26 @@ async function startServer() {
     })();
     
     res.json({ success: true });
+  });
+
+  // Exchange Rates
+  app.get("/api/exchange-rate", (req, res) => {
+    try {
+        const row = db.prepare("SELECT * FROM exchange_rates ORDER BY fetched_at DESC LIMIT 1").get() as any;
+        res.json(row || { rate: 0 });
+    } catch(e: any) {
+        res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/exchange-rate/refresh", async (req, res) => {
+    try {
+        const success = await fetchExchangeRate();
+        const row = db.prepare("SELECT * FROM exchange_rates ORDER BY fetched_at DESC LIMIT 1").get() as any;
+        res.json({ success, rate: row?.rate, source: row?.source, fetched_at: row?.fetched_at });
+    } catch(e: any) {
+        res.status(500).json({ error: e.message });
+    }
   });
 
   // Settings
@@ -1222,31 +1659,93 @@ async function startServer() {
   app.post("/api/sales", (req, res) => {
     try {
       const id = uuidv4();
-      const { customer_name, customer_phone, customer_address, shipping_company, tracking_number, total_weight, total_quantity, total_amount, items } = req.body;
+      const { 
+        customer_name, customer_phone, customer_address, 
+        shipping_company, tracking_number, total_weight, total_quantity, total_amount, 
+        items, platform, commission_rate, shipping_cost, discount, cash_account_id 
+      } = req.body;
       
       db.transaction(() => {
+        let totalPurchaseCost = 0;
+        const processedItems = items.map((item: any) => {
+          const product = db.prepare("SELECT purchase_cost FROM products WHERE id = ?").get(item.product_id) as any;
+          const pc = product?.purchase_cost || 0;
+          totalPurchaseCost += (pc * item.quantity);
+          return { ...item, purchase_cost: pc, price: item.price || 0 };
+        });
+
         // 1. Stock Validation for all items
-        for (const item of items) {
+        for (const item of processedItems) {
           const totalStockResult = db.prepare("SELECT COALESCE(SUM(stock), 0) as total FROM product_platforms WHERE product_id = ?").get(item.product_id) as any;
           if (totalStockResult.total < item.quantity) {
             throw new Error(`Yetersiz stok. ${item.product_name} için mevcut stok: ${totalStockResult.total} adet.`);
           }
         }
 
+        const commRate = parseFloat(commission_rate) || 0;
+        const discountAmt = parseFloat(discount) || 0;
+        const shipCost = parseFloat(shipping_cost) || 0;
+        
+        let netProfit = total_amount - discountAmt - shipCost - (total_amount * commRate / 100) - totalPurchaseCost;
+
+        // Cash Logic
+        let finalCashAccountId = cash_account_id;
+        const plat = platform || 'Satış Sistemi';
+        const isPlatform = ['Trendyol', 'Hepsiburada', 'Amazon', 'N11'].includes(plat);
+
+        if (isPlatform) {
+           const platAccountName = `${plat} Bekleyen`;
+           const foundAcc = db.prepare("SELECT id FROM cash_accounts WHERE name LIKE ?").get(`%${platAccountName}%`) as any;
+           if (foundAcc) {
+              finalCashAccountId = foundAcc.id;
+           } else {
+              // fallback
+              const pAccId = uuidv4();
+              db.prepare("INSERT INTO cash_accounts (id, name, currency, type) VALUES (?, ?, ?, ?)").run(pAccId, platAccountName, 'TRY', 'platform');
+              finalCashAccountId = pAccId;
+           }
+        }
+
+        if (!finalCashAccountId) {
+           throw new Error("Satış için kasa hesabı belirlenemedi. (Nakit/Elden satışlar için kasa seçimi zorunludur.)");
+        }
+
+        const account = db.prepare("SELECT currency FROM cash_accounts WHERE id = ?").get(finalCashAccountId) as any;
+        if (!account) throw new Error("Seçili kasa hesabı bulunamadı.");
+
+        let finalAmountToCash = total_amount - discountAmt;
+        if (isPlatform) {
+           finalAmountToCash = total_amount - discountAmt - shipCost - (total_amount * commRate / 100);
+        }
+
+        db.prepare(`
+           INSERT INTO cash_transactions (id, account_id, type, amount, currency, exchange_rate_at_transaction, source_type, source_id, description)
+           VALUES (?, ?, 'IN', ?, ?, 1, 'sale', ?, ?)
+        `).run(uuidv4(), finalCashAccountId, finalAmountToCash, account.currency, id, `Satış: ${customer_name} (${plat})`);
+
+
+        const activeRate = getActiveExchangeRate();
+        if (!activeRate || activeRate <= 0) throw new Error("Güncel döviz kuru bulunamadı. Lütfen ayarlardan kuru yenileyin.");
+
         // 2. Create Sale
         db.prepare(`
-          INSERT INTO sales (id, customer_name, customer_phone, customer_address, shipping_company, tracking_number, total_weight, total_quantity, total_amount)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(id, customer_name, customer_phone, customer_address, shipping_company, tracking_number, total_weight, total_quantity, total_amount);
+          INSERT INTO sales (id, customer_name, customer_phone, customer_address, shipping_company, tracking_number, total_weight, total_quantity, total_amount, platform, commission_rate, shipping_cost, discount, net_profit, cash_account_id, exchange_rate_at_transaction)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, customer_name, customer_phone, customer_address, shipping_company, tracking_number, total_weight, total_quantity, total_amount, plat, commRate, shipCost, discountAmt, netProfit, finalCashAccountId, activeRate);
 
         const insertItem = db.prepare(`
-          INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, weight)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, weight, unit_price, purchase_cost, net_profit)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         // 3. Process items: Sale Items, Stock deduction, Stock Movements
-        for (const item of items) {
-          insertItem.run(uuidv4(), id, item.product_id, item.product_name, item.quantity, item.weight);
+        for (const item of processedItems) {
+          const lineRevenue = item.price * item.quantity;
+          const lineCost = item.purchase_cost * item.quantity;
+          const lineCommission = lineRevenue * commRate / 100;
+          const itemNetProfit = lineRevenue - lineCost - lineCommission;
+
+          insertItem.run(uuidv4(), id, item.product_id, item.product_name, item.quantity, item.weight, item.price, item.purchase_cost, itemNetProfit);
 
           let remainingToDeduct = item.quantity;
           const platforms = db.prepare("SELECT * FROM product_platforms WHERE product_id = ? AND stock > 0 ORDER BY stock DESC").all(item.product_id) as any[];
@@ -1256,22 +1755,22 @@ async function startServer() {
             const deduct = Math.min(plat.stock, remainingToDeduct);
             db.prepare("UPDATE product_platforms SET stock = stock - ? WHERE id = ?").run(deduct, plat.id);
             
-            db.prepare("INSERT INTO stock_movements (id, product_id, platform_name, change_amount, reason) VALUES (?, ?, ?, ?, ?)")
-              .run(uuidv4(), item.product_id, plat.platform_name, -deduct, `satıştan otomatik düşüldü (Satış no: ${id})`);
+            try {
+              db.prepare("INSERT INTO stock_movements (id, product_id, platform_name, change_amount, reason, type) VALUES (?, ?, ?, ?, ?, ?)")
+                .run(uuidv4(), item.product_id, plat.platform_name, -deduct, `satıştan düşüldü (No: ${id})`, 'OUT');
+            } catch(e) {
+              // fallback if type column hasn't migrated
+              db.prepare("INSERT INTO stock_movements (id, product_id, platform_name, change_amount, reason) VALUES (?, ?, ?, ?, ?)")
+                .run(uuidv4(), item.product_id, plat.platform_name, -deduct, `satıştan otomatik düşüldü (Satış no: ${id})`);
+            }
             
             remainingToDeduct -= deduct;
           }
         }
-
-        // 4. Create Income Transaction
-        db.prepare(`
-          INSERT INTO transactions (id, type, category, platform, amount, note)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `).run(uuidv4(), 'Income', 'Satış', 'Satış Sistemi', total_amount, `Satış geliri - ${customer_name}`);
         
       })();
 
-      res.json({ success: true, saleId: id, message: "Satış kaydedildi, stok düşüldü ve gelir işlendi." });
+      res.json({ success: true, message: "Satış başarıyla kaydedildi.", id });
     } catch (err: any) {
       res.status(400).json({ success: false, error: err.message });
     }

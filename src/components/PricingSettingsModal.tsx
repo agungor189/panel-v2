@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Check, Calculator, AlertTriangle, RefreshCw } from 'lucide-react';
-import { api, formatCurrency } from '../lib/api';
+import { api } from '../lib/api';
+import { useCurrency } from '../CurrencyContext';
 
 export default function PricingSettingsModal({ 
   onClose, 
@@ -11,7 +12,8 @@ export default function PricingSettingsModal({
   onRefresh: () => void,
   products: any[] 
 }) {
-  const [exchangeRate, setExchangeRate] = useState<number>(32.5);
+  const { FormatAmount, activeRate, refreshRate: fetchRateFromApi } = useCurrency();
+  const [exchangeRate, setExchangeRate] = useState<number>(activeRate);
   const [bufferPercentage, setBufferPercentage] = useState<number>(20);
   const [profitPercentage, setProfitPercentage] = useState<number>(50);
   const [includeLocked, setIncludeLocked] = useState<boolean>(false);
@@ -226,8 +228,8 @@ export default function PricingSettingsModal({
                 <AlertTriangle className="w-5 h-5 text-orange-500" />
                 Önizleme Tablosu
               </h3>
-              <div className="border border-gray-200 rounded-xl overflow-hidden">
-                <table className="w-full text-left text-sm">
+              <div className="border border-gray-200 rounded-xl overflow-x-auto">
+                <table className="w-full text-left text-sm min-w-[800px]">
                   <thead className="bg-gray-100 text-gray-600 font-semibold">
                     <tr>
                       <th className="px-4 py-3">Ürün</th>
@@ -245,12 +247,12 @@ export default function PricingSettingsModal({
                         <tr key={p.id} className={p.willUpdate ? 'bg-white' : 'bg-gray-50 opacity-60'}>
                           <td className="px-4 py-3 font-medium">{p.name || p.title}</td>
                           <td className="px-4 py-3">${(p.purchase_price_usd || 0).toFixed(2)}</td>
-                          <td className="px-4 py-3">{formatCurrency(p.sale_price || 0)}</td>
-                          <td className="px-4 py-3 font-bold text-blue-600">{formatCurrency(p.newSalePrice)}</td>
+                          <td className="px-4 py-3"><FormatAmount amount={p.sale_price || 0} /></td>
+                          <td className="px-4 py-3 font-bold text-blue-600"><FormatAmount amount={p.newSalePrice} /></td>
                           <td className="px-4 py-3">
                             {diff !== 0 ? (
                               <span className={diff > 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'}>
-                                {diff > 0 ? '+' : ''}{formatCurrency(diff)}
+                                {diff > 0 ? '+' : ''}<FormatAmount amount={diff} />
                               </span>
                             ) : '-'}
                           </td>

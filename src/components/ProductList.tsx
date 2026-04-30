@@ -14,7 +14,8 @@ import {
   FileText,
   ScanLine
 } from 'lucide-react';
-import { api, formatCurrency, PLATFORMS } from '../lib/api';
+import { api, PLATFORMS } from '../lib/api';
+import { useCurrency } from '../CurrencyContext';
 import { Product } from '../types';
 import Papa from 'papaparse';
 import { clsx, type ClassValue } from 'clsx';
@@ -33,6 +34,7 @@ interface ProductListProps {
 }
 
 export default function ProductList({ onAddProduct, onProductClick }: ProductListProps) {
+  const { FormatAmount, activeRate, viewCurrency } = useCurrency();
   const [products, setProducts] = useState<Product[]>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
   const [search, setSearch] = useState('');
@@ -447,7 +449,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
                 <p className="text-[10px] text-text-muted font-mono mt-1">{p.sku}</p>
                 
                 <div className="mt-3 lg:mt-4 pt-3 lg:pt-4 border-t border-border-color flex items-center justify-between">
-                   <p className="font-bold text-base text-text-main">{formatCurrency(p.sale_price)}</p>
+                   <p className="font-bold text-base text-text-main"><FormatAmount amount={p.sale_price || 0} /></p>
                    <div className="text-right">
                      <p className={cn(
                        "text-xs font-bold", 
@@ -464,7 +466,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
       ) : (
         <div className="card">
           <div className="overflow-x-auto">
-            <table className="w-full text-left">
+            <table className="w-full text-left min-w-[1000px]">
               <thead>
                 <tr className="bg-bg-main text-[10px] uppercase tracking-widest text-text-muted font-extrabold border-b border-border-color">
                   <th className="px-4 py-5">Ürün</th>
@@ -501,7 +503,6 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
                           <p className="text-sm font-bold text-text-main group-hover:text-primary transition-colors line-clamp-1">{p.name || p.title}</p>
                           <div className="flex items-center gap-2 mt-0.5">
                             <p className="text-[10px] text-text-muted font-mono uppercase tracking-tighter truncate">{p.sku}</p>
-                            {p.price_locked && <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1 py-0.5 rounded font-bold">Kilitli</span>}
                           </div>
                         </div>
                       </div>
@@ -515,10 +516,10 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
                       ${(p.purchase_price_usd || 0).toFixed(2)}
                     </td>
                     <td className="px-4 py-4 hidden lg:table-cell text-sm font-medium text-gray-500 text-right">
-                      {formatCurrency(bufferedCostTRY)}
+                      <FormatAmount align="right" amount={bufferedCostTRY} />
                     </td>
                     <td className="px-4 py-4 text-sm font-extrabold text-blue-600 text-right">
-                      {formatCurrency(p.sale_price)}
+                      <FormatAmount align="right" amount={p.sale_price || 0} />
                     </td>
                     <td className="px-4 py-4 hidden sm:table-cell text-center">
                       <span className={cn(
@@ -537,7 +538,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
                       </span>
                     </td>
                     <td className="px-4 py-4 text-sm font-bold text-gray-700 text-right">
-                      {formatCurrency(stockValue)}
+                      <FormatAmount align="right" amount={stockValue} />
                     </td>
                     <td className="px-4 py-4 hidden sm:table-cell text-center"><StatusBadge status={p.status} /></td>
                   </tr>
@@ -555,7 +556,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
                     {filteredProducts.reduce((sum, p) => sum + (p.total_stock || 0), 0)}
                   </td>
                   <td className="px-4 py-4 text-right font-black text-blue-700 text-sm">
-                    {formatCurrency(filteredProducts.reduce((sum, p) => sum + ((p.total_stock || 0) * (p.sale_price || 0)), 0))}
+                    <FormatAmount align="right" amount={filteredProducts.reduce((sum, p) => sum + ((p.total_stock || 0) * (p.sale_price || 0)), 0)} />
                   </td>
                   <td className="px-4 py-4 hidden sm:table-cell"></td>
                 </tr>

@@ -11,6 +11,7 @@ import {
   Trash2,
   ListFilter
 } from 'lucide-react';
+import { useCurrency } from '../CurrencyContext';
 import { api } from '../lib/api';
 import { Settings } from '../types';
 import { clsx, type ClassValue } from 'clsx';
@@ -25,6 +26,8 @@ interface SettingsViewProps {
 }
 
 export default function SettingsView({ onUpdate }: SettingsViewProps) {
+  const { refreshRate, activeRate } = useCurrency();
+  const [exchangeRateInfo, setExchangeRateInfo] = useState<any>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -36,7 +39,28 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
 
   useEffect(() => {
     loadSettings();
+    loadExchangeRate();
   }, []);
+
+  const loadExchangeRate = async () => {
+    try {
+      const data = await api.get('/api/exchange-rate'); // actually the base is already /api, so api.get('/exchange-rate')
+      setExchangeRateInfo(await api.get('/exchange-rate'));
+    } catch(e) {}
+  };
+
+  const handleRefreshRate = async () => {
+    try {
+      setLoading(true);
+      const res = await api.post('/exchange-rate/refresh', {});
+      setExchangeRateInfo(res);
+      await refreshRate(); // Update global context too
+    } catch(e) {
+      alert("Kur güncellenemedi.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const loadSettings = async () => {
     try {
@@ -145,19 +169,31 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
                     />
                  </div>
                </div>
-               <div className="grid grid-cols-2 gap-6">
-                 <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-text-muted uppercase tracking-widest px-1">USD Kuru ($ → ₺)</label>
-                    <div className="relative">
-                      <div className="absolute left-4 top-3 text-text-muted font-bold text-sm">₺</div>
-                      <input 
-                        type="number" 
-                        step="0.01"
-                        value={settings.usd_exchange_rate} 
-                        onChange={e => setSettings({...settings, usd_exchange_rate: parseFloat(e.target.value)})}
-                        className="form-input font-bold pl-10"
-                      />
+               <div className="grid grid-cols-2 lg:grid-cols-3 gap-6">
+                 <div className="space-y-1.5 col-span-2 lg:col-span-1">
+                    <label className="text-[11px] font-bold text-text-muted uppercase tracking-widest px-1">Güncel USD/TRY Kuru (Oto)</label>
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <div className="absolute left-4 top-3 text-text-muted font-bold text-sm">₺</div>
+                        <input 
+                          type="number" 
+                          readOnly
+                          value={exchangeRateInfo?.rate || activeRate || 0} 
+                          className="form-input font-bold pl-10 bg-bg-muted text-text-muted cursor-not-allowed"
+                        />
+                      </div>
+                      <button 
+                        onClick={handleRefreshRate}
+                        disabled={loading}
+                        className="px-3 py-2.5 bg-primary/10 text-primary hover:bg-primary/20 font-bold rounded-xl whitespace-nowrap text-sm"
+                      >Yenile
+                      </button>
                     </div>
+                    {exchangeRateInfo && (
+                      <p className="text-[10px] text-text-muted mt-1 px-1">
+                        K: {exchangeRateInfo.source} | Son: {new Date(exchangeRateInfo.fetched_at).toLocaleTimeString('tr-TR')}
+                      </p>
+                    )}
                  </div>
                  <div className="space-y-1.5">
                     <label className="text-[11px] font-bold text-text-muted uppercase tracking-widest px-1">Varsayılan Buffer (%)</label>
@@ -167,6 +203,18 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
                         type="number" 
                         value={settings.default_buffer_percentage} 
                         onChange={e => setSettings({...settings, default_buffer_percentage: parseInt(e.target.value)})}
+                        className="form-input font-bold pr-10"
+                      />
+                    </div>
+                 </div>
+                 <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-text-muted uppercase tracking-widest px-1">Varsayılan Kar Marjı (%)</label>
+                    <div className="relative">
+                      <div className="absolute right-4 top-3 text-text-muted font-bold text-sm">%</div>
+                      <input 
+                        type="number" 
+                        value={settings?.default_profit_percentage || 0} 
+                        onChange={e => setSettings({...settings, default_profit_percentage: parseInt(e.target.value)})}
                         className="form-input font-bold pr-10"
                       />
                     </div>

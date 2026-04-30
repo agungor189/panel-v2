@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, FileText, Download, Trash2, X, ChevronRight, Calculator, Calendar, DollarSign, Tag, Image as ImageIcon, Briefcase, FileSignature, Paperclip } from 'lucide-react';
 import { api } from '../lib/api';
+import { useCurrency } from '../CurrencyContext';
 import { Transaction, ExpenseAttachment, Settings } from '../types';
 
 export default function Expenses({ settings }: { settings?: Settings | null }) {
+  const { FormatAmount } = useCurrency();
   const [expenses, setExpenses] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -65,7 +67,7 @@ export default function Expenses({ settings }: { settings?: Settings | null }) {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse min-w-[800px]">
             <thead>
               <tr className="bg-white border-b border-gray-100 text-gray-500 text-sm">
                 <th className="px-6 py-4 font-bold">Tarih</th>
@@ -110,7 +112,7 @@ export default function Expenses({ settings }: { settings?: Settings | null }) {
                     )}
                   </td>
                   <td className="px-6 py-4 font-black text-right whitespace-nowrap text-red-600">
-                    {(expense.amount || 0).toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })}
+                    <FormatAmount align="right" amount={expense.amount || 0} exchangeRateAtTransaction={expense.exchange_rate_at_transaction} />
                   </td>
                   <td className="px-6 py-4 text-right">
                     <button className="text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity p-2 hover:bg-blue-50 rounded-lg">
@@ -153,6 +155,7 @@ export default function Expenses({ settings }: { settings?: Settings | null }) {
 
 function ExpenseAddModal({ onClose, onRefresh, settings }: { onClose: () => void, onRefresh: () => void, settings?: Settings | null }) {
   const [saving, setSaving] = useState(false);
+  const [cashAccounts, setCashAccounts] = useState<any[]>([]);
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     category: '',
@@ -161,15 +164,20 @@ function ExpenseAddModal({ onClose, onRefresh, settings }: { onClose: () => void
     amount: '',
     payment_method: '',
     supplier: '',
-    invoice_number: ''
+    invoice_number: '',
+    cash_account_id: ''
   });
 
   const categories = settings?.expense_categories || [];
 
+  useEffect(() => {
+    api.get('/cash-accounts').then(setCashAccounts).catch(console.error);
+  }, []);
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.title || !formData.amount || !formData.category) {
-      alert("Lütfen başlık, tutar ve kategori giriniz.");
+    if (!formData.title || !formData.amount || !formData.category || !formData.cash_account_id) {
+      alert("Lütfen başlık, tutar, kategori ve kasa hesabı giriniz.");
       return;
     }
      
@@ -263,17 +271,15 @@ function ExpenseAddModal({ onClose, onRefresh, settings }: { onClose: () => void
                 />
              </div>
              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Ödeme Yöntemi</label>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Kasa Hesabı (Çıkış)</label>
                 <select
-                  value={formData.payment_method}
-                  onChange={e => setFormData({...formData, payment_method: e.target.value})}
+                  value={formData.cash_account_id}
+                  onChange={e => setFormData({...formData, cash_account_id: e.target.value})}
                   className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white transition-colors"
+                  required
                 >
                   <option value="">Seçiniz...</option>
-                  <option value="Kredi Kartı">Kredi Kartı</option>
-                  <option value="Banka Transferi (Havale/EFT)">Banka Transferi</option>
-                  <option value="Nakit">Nakit</option>
-                  <option value="Şirket Hesabı">Şirket Hesabı</option>
+                  {cashAccounts.map(a => <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>)}
                 </select>
              </div>
           </div>
@@ -317,6 +323,7 @@ function ExpenseAddModal({ onClose, onRefresh, settings }: { onClose: () => void
 }
 
 function ExpenseDetailModal({ expense: currentExpense, onClose, onRefresh, settings }: { expense: Transaction, onClose: () => void, onRefresh: () => void, settings?: Settings | null }) {
+  const { FormatAmount } = useCurrency();
   const [expense, setExpense] = useState<Transaction>(currentExpense);
   const [attachments, setAttachments] = useState<ExpenseAttachment[]>([]);
   const [activeTab, setActiveTab] = useState<'details'|'attachments'>('details');
@@ -584,7 +591,7 @@ function ExpenseDetailModal({ expense: currentExpense, onClose, onRefresh, setti
                         <div className="bg-gray-50 p-6 rounded-xl border border-gray-100 flex items-center justify-between">
                            <div>
                              <p className="text-gray-500 text-sm font-medium mb-1">Toplam Tutar</p>
-                             <div className="text-3xl font-black text-gray-900 tracking-tight">{(expense.amount || 0).toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })}</div>
+                             <div className="text-3xl font-black text-gray-900 tracking-tight"><FormatAmount amount={expense.amount || 0} exchangeRateAtTransaction={expense.exchange_rate_at_transaction} /></div>
                            </div>
                            <button onClick={() => setIsEditing(true)} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg shadow-sm hover:bg-gray-50 transition-colors">
                              Düzenle

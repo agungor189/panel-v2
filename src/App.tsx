@@ -18,7 +18,10 @@ import {
   Briefcase,
   ShoppingCart,
   Key,
-  TerminalSquare
+  TerminalSquare,
+  Landmark,
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import ProductList from './components/ProductList';
@@ -31,9 +34,11 @@ import RecurringPayments from './components/RecurringPayments';
 import SettingsView from './components/SettingsView';
 import ActivityLogs from './components/ActivityLogs';
 import LoginPage from './components/LoginPage';
+import CashManagement from './components/CashManagement';
 import { api } from './lib/api';
 import { Settings } from './types';
 import { clsx, type ClassValue } from 'clsx';
+import { useCurrency } from './CurrencyContext';
 import { twMerge } from 'tailwind-merge';
 
 import B2BFirms from './components/b2b/B2BFirms';
@@ -50,7 +55,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type View = 'dashboard' | 'products' | 'product-detail' | 'product-wizard' | 'stock' | 'income' | 'expense' | 'recurring' | 'analytics' | 'settings' | 'activity-logs' | 'b2b' | 'sales' | 'api-keys' | 'panel-api';
+type View = 'dashboard' | 'products' | 'product-detail' | 'product-wizard' | 'stock' | 'income' | 'expense' | 'recurring' | 'analytics' | 'settings' | 'activity-logs' | 'b2b' | 'sales' | 'api-keys' | 'panel-api' | 'cash';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -152,11 +157,14 @@ export default function App() {
     { id: 'products', label: 'Ürünler', icon: Package },
     { id: 'sales', label: 'Satışlar', icon: ShoppingCart },
     { id: 'b2b', label: 'B2B', icon: Briefcase },
+    { id: 'cash', label: 'Kasa / Nakit Akışı', icon: Landmark },
     { id: 'income', label: 'Gelirler', icon: TrendingUp },
     { id: 'expense', label: 'Giderler', icon: TrendingDown },
     { id: 'recurring', label: 'Periyodikler', icon: Repeat },
     { id: 'analytics', label: 'Analizler', icon: BarChart3 },
   ];
+
+  const { viewCurrency, setViewCurrency, activeRate, rateSource, rateFetchedAt, isRateLoading, isRateError, refreshRate } = useCurrency();
 
   if (!isAuthenticated) {
     return <LoginPage onLogin={handleLogin} />;
@@ -326,43 +334,103 @@ export default function App() {
 
       {/* Main Content */}
       <main className={cn(
-        "transition-all duration-300 min-h-screen flex flex-col w-full",
+        "transition-all duration-300 min-h-screen flex flex-col w-full overflow-x-hidden",
         isSidebarOpen ? "md:pl-64" : "md:pl-20"
       )}>
         {/* Header */}
-        <header className="h-16 bg-white border-b border-border-color flex items-center justify-between px-4 md:px-8 sticky top-0 z-40">
-          <div className="flex items-center space-x-4 md:space-x-6">
-             <button 
-               onClick={() => setIsMobileMenuOpen(true)}
-               className="md:hidden p-2 text-text-muted hover:text-primary transition-colors"
-             >
-                <Menu className="w-6 h-6" />
-             </button>
-             <h2 className="text-base md:text-lg font-semibold text-text-main truncate">
-                {navItems.find(i => i.id === currentView)?.label || 'Ürün Detayı'}
-             </h2>
-          </div>
-
-          <div className="flex items-center space-x-2 md:space-x-6">
-             <div className="relative hidden md:block search-bar-container">
-               <input 
-                 type="text" 
-                 placeholder="Ürün Ara..." 
-                 className="pl-9 pr-4 py-1.5 bg-bg-main border border-border-color rounded-lg text-sm w-40 md:w-60 focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none"
-               />
-               <Search className="w-4 h-4 text-text-muted absolute left-3 top-2" />
-             </div>
-             <button className="p-2 text-text-muted hover:text-primary transition-colors">
-               <Bell className="w-5 h-5" />
-             </button>
-             <div className="flex items-center space-x-2 md:space-x-3 border-l border-border-color pl-2 md:pl-6">
-              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-[10px] font-bold shrink-0">
-                {userRole === 'admin' ? 'AD' : 'US'}
-              </div>
-              <span className="text-sm font-semibold text-text-main hidden sm:inline capitalize">{userRole}</span>
+        <div className="sticky top-0 z-40 bg-white border-b border-border-color shadow-sm">
+          <header className="h-16 flex items-center justify-between px-4 md:px-8">
+            <div className="flex items-center space-x-4 md:space-x-6">
+               <button 
+                 onClick={() => setIsMobileMenuOpen(true)}
+                 className="md:hidden p-2 text-text-muted hover:text-primary transition-colors"
+               >
+                  <Menu className="w-6 h-6" />
+               </button>
+               <h2 className="text-base md:text-lg font-semibold text-text-main truncate">
+                  {navItems.find(i => i.id === currentView)?.label || 'Ürün Detayı'}
+               </h2>
             </div>
+
+            <div className="flex items-center space-x-2 md:space-x-6">
+               {/* Exchange Rate Indicator */}
+               <div 
+                 className="hidden md:flex items-center gap-2 group relative bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-xl transition-all hover:bg-gray-100"
+                 title={`Kaynak: ${rateSource || 'Bilinmiyor'}`}
+               >
+                  {isRateError && (
+                     <AlertTriangle className="w-4 h-4 text-red-500" />
+                  )}
+                  <span className="font-bold text-sm text-gray-700 whitespace-nowrap">USD/TRY: ₺{activeRate?.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  {rateFetchedAt && (
+                     <span className="text-[10px] text-gray-500 font-medium whitespace-nowrap">· Son güncelleme: {new Date(rateFetchedAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>
+                  )}
+                  <button onClick={refreshRate} disabled={isRateLoading} className="p-1 hover:bg-gray-200 rounded-md transition-colors disabled:opacity-50 ml-1">
+                     <RefreshCw className={cn("w-3.5 h-3.5 text-gray-500", isRateLoading && "animate-spin")} />
+                  </button>
+               </div>
+
+               {/* Global Currency Toggle */}
+               <div className="hidden sm:flex bg-gray-100 p-1 rounded-xl items-center gap-1">
+                 <button
+                   onClick={() => setViewCurrency('TRY')}
+                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewCurrency === 'TRY' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                 >TL</button>
+                 <button
+                   onClick={() => setViewCurrency('USD')}
+                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewCurrency === 'USD' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                 >USD</button>
+                 <button
+                   onClick={() => setViewCurrency('TL+USD')}
+                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewCurrency === 'TL+USD' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                 >TL+USD</button>
+               </div>
+
+               <div className="relative hidden md:block search-bar-container">
+                 <input 
+                   type="text" 
+                   placeholder="Ürün Ara..." 
+                   className="pl-9 pr-4 py-1.5 bg-bg-main border border-border-color rounded-lg text-sm w-40 md:w-60 focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none"
+                 />
+                 <Search className="w-4 h-4 text-text-muted absolute left-3 top-2" />
+               </div>
+               <button className="p-2 text-text-muted hover:text-primary transition-colors">
+                 <Bell className="w-5 h-5" />
+               </button>
+               <div className="flex items-center space-x-2 md:space-x-3 border-l border-border-color pl-2 md:pl-6">
+                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-[10px] font-bold shrink-0">
+                  {userRole === 'admin' ? 'AD' : 'US'}
+                </div>
+                <span className="text-sm font-semibold text-text-main hidden sm:inline capitalize">{userRole}</span>
+              </div>
+            </div>
+          </header>
+          
+          {/* Mobile Subheader */}
+          <div className="sm:hidden flex items-center justify-between px-4 py-2.5 bg-gray-50 border-t border-gray-100">
+             <div className="flex items-center gap-2">
+                <span className="font-bold text-xs text-gray-700 whitespace-nowrap">₺{activeRate?.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <button onClick={refreshRate} disabled={isRateLoading} className="p-1 hover:bg-gray-200 rounded-md transition-colors disabled:opacity-50">
+                   <RefreshCw className={cn("w-3 h-3 text-gray-500", isRateLoading && "animate-spin")} />
+                </button>
+             </div>
+             
+             <div className="flex bg-gray-200/50 p-1 rounded-lg items-center gap-1">
+               <button
+                 onClick={() => setViewCurrency('TRY')}
+                 className={`px-2 py-1 rounded-[5px] text-[10px] font-bold transition-all ${viewCurrency === 'TRY' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+               >TL</button>
+               <button
+                 onClick={() => setViewCurrency('USD')}
+                 className={`px-2 py-1 rounded-[5px] text-[10px] font-bold transition-all ${viewCurrency === 'USD' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+               >USD</button>
+               <button
+                 onClick={() => setViewCurrency('TL+USD')}
+                 className={`px-2 py-1 rounded-[5px] text-[10px] font-bold transition-all ${viewCurrency === 'TL+USD' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+               >TL+USD</button>
+             </div>
           </div>
-        </header>
+        </div>
 
         {/* User Role Styles constraints */}
         {userRole === 'user' && (
@@ -423,6 +491,7 @@ export default function App() {
             }} />
           )}
           {currentView === 'sales' && <Sales />}
+          {currentView === 'cash' && <CashManagement />}
           {currentView === 'income' && <Transactions initialType="Income" settings={settings} />}
           {currentView === 'expense' && <Expenses settings={settings} />}
           {currentView === 'recurring' && <RecurringPayments settings={settings} />}

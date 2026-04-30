@@ -1,41 +1,41 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+// @ts-ignore
+import { Responsive } from 'react-grid-layout';
+import 'react-grid-layout/css/styles.css';
+import 'react-resizable/css/styles.css';
 import { 
   TrendingUp, 
   TrendingDown, 
   DollarSign, 
   AlertTriangle,
-  ArrowUpRight,
-  Package,
-  Activity,
   RefreshCw,
+  Package,
+  Settings,
+  Edit,
+  Check,
+  Plus,
+  Trash2,
+  X,
+  CreditCard,
+  Briefcase
 } from 'lucide-react';
-import { api, formatCurrency } from '../lib/api';
-import { DashboardMetrics, Product } from '../types';
+import { 
+  LineChart, 
+  Line, 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer 
+} from 'recharts';
+import { v4 as uuidv4 } from 'uuid';
+import { api } from '../lib/api';
+import { useCurrency } from '../CurrencyContext';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  PointElement,
-  LineElement,
-} from 'chart.js';
-import { Bar, Line } from 'react-chartjs-2';
-
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend
-);
+import { WidgetRenderer } from './dashboard/WidgetRenderer';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -46,433 +46,458 @@ interface DashboardProps {
   onProductClick: (id: string) => void;
 }
 
-// Module-level cache for instant load on back-navigation
-let cachedDashboardData: any = null;
-
-export default function Dashboard({ onNavigate, onProductClick }: DashboardProps) {
-  const [data, setData] = useState<any>(cachedDashboardData);
-  const [loading, setLoading] = useState<boolean>(!cachedDashboardData);
+export default function Dashboard({ onNavigate }: DashboardProps) {
+  const { FormatAmount } = useCurrency();
+  const [data, setData] = useState<any>(null);
+  const [widgets, setWidgets] = useState<any[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<boolean>(false);
-  const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [showLowStockModal, setShowLowStockModal] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [showConfig, setShowConfig] = useState<string | null>(null);
+  
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(typeof window !== 'undefined' ? Math.min(window.innerWidth, 1200) : 1200);
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
 
   useEffect(() => {
-    loadData(false);
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+       if (entries[0] && entries[0].contentRect.width > 0) {
+         setWidth(entries[0].contentRect.width);
+         setIsMobile(window.innerWidth < 768);
+       }
+    });
+    observer.observe(containerRef.current);
+    
+    const handleResize = () => {
+      if (containerRef.current) {
+         setWidth(containerRef.current.clientWidth);
+      }
+      setIsMobile(window.innerWidth < 768);
+    };
+    window.addEventListener('resize', handleResize);
+    
+    return () => {
+       observer.disconnect();
+       window.removeEventListener('resize', handleResize);
+    };
   }, []);
 
-  const loadData = async (isManualRefresh = false) => {
-    if (isManualRefresh) setRefreshing(true);
+  useEffect(() => {
+    Promise.all([loadData(), loadWidgets()]);
+  }, []);
+
+  const loadWidgets = async () => {
+    try {
+      const result = await api.get('/dashboard/widgets');
+      setWidgets(result);
+    } catch (err) {
+      console.error("Widgets load error", err);
+    }
+  };
+
+  const saveLayout = async (layout: any) => {
+    if (!editMode) return;
+    const updated = widgets.map(w => {
+      const lItem = layout.find(l => l.i === w.id);
+      if (lItem) {
+        return { ...w, position_x: lItem.x, position_y: lItem.y, width: lItem.w, height: lItem.h };
+      }
+      return w;
+    });
+    setWidgets(updated);
+  };
+
+  const applyChanges = async () => {
+    try {
+      await api.put('/dashboard/widgets', widgets);
+      setEditMode(false);
+    } catch (err) {
+      alert("Failed to save layout");
+    }
+  };
+
+  const removeWidget = async (id: string) => {
+    try {
+      await api.delete(`/dashboard/widgets/${id}`);
+      setWidgets(widgets.filter(w => w.id !== id));
+    } catch(err) {
+      alert("Failed to delete widget");
+    }
+  };
+
+  const loadData = async () => {
     try {
       const result = await api.get('/dashboard-summary');
-      cachedDashboardData = result;
       setData(result);
       setError(false);
     } catch (err) {
       console.error("Dashboard load error", err);
-      if (!cachedDashboardData) setError(true);
+      setError(true);
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   };
 
-  const metrics = data?.metrics;
-  const chartData = data?.charts;
-  const recentTransactions = data?.recentTransactions || [];
-  const lowStockProducts = metrics?.lowStockProducts || [];
+  const m = data?.metrics;
 
-  const barChartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { display: false },
-    },
-    scales: {
-      y: { grid: { display: false } },
-      x: { grid: { display: false } }
-    }
+  const getGrossProfitEstimate = () => {
+    if (!m) return 0;
+    return m.totalStockSalesValue - m.totalStockCostValue;
   };
 
-  const lineChartData = {
-    labels: chartData?.monthlyData?.map((d: any) => d.month) || [],
-    datasets: [
-      {
-        label: 'Gelir',
-        data: chartData?.monthlyData?.map((d: any) => d.income) || [],
-        borderColor: '#10B981',
-        backgroundColor: '#10B981',
-        tension: 0.4,
-      },
-      {
-        label: 'Gider',
-        data: chartData?.monthlyData?.map((d: any) => d.expense) || [],
-        borderColor: '#EF4444',
-        backgroundColor: '#EF4444',
-        tension: 0.4,
-      }
-    ]
-  };
-
-  const platformChartData = {
-    labels: chartData?.platformRevenue?.map((d: any) => d.platform) || [],
-    datasets: [
-      {
-        data: chartData?.platformRevenue?.map((d: any) => d.total) || [],
-        backgroundColor: ['#3B82F6', '#8B5CF6', '#F59E0B', '#10B981', '#EC4899', '#64748B'],
-        borderRadius: 8,
-      }
-    ]
+  const getAvgMarginEstimate = () => {
+    const p = getGrossProfitEstimate();
+    if (!m || m.totalStockSalesValue <= 0) return 0;
+    return (p / m.totalStockSalesValue) * 100;
   };
 
   if (loading) {
     return (
       <div className="space-y-8 animate-in fade-in duration-500">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-          {[...Array(8)].map((_, i) => (
-            <div key={i} className="p-5 rounded-xl bg-white border border-border-color shadow-sm h-[130px] flex flex-col justify-between">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="p-6 rounded-2xl bg-white border border-gray-100 shadow-sm h-[180px] flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <div className="w-9 h-9 rounded-lg bg-gray-100 animate-pulse"></div>
+                <div className="w-12 h-12 rounded-xl bg-gray-100 animate-pulse"></div>
               </div>
               <div>
-                <div className="w-24 h-3 bg-gray-100 rounded animate-pulse mb-2"></div>
-                <div className="w-32 h-6 bg-gray-200 rounded animate-pulse"></div>
+                <div className="w-32 h-4 bg-gray-100 rounded animate-pulse mb-3"></div>
+                <div className="w-48 h-8 bg-gray-200 rounded animate-pulse"></div>
               </div>
             </div>
           ))}
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 card p-6 h-[400px] flex items-center justify-center">
-            <div className="w-full h-full bg-gray-50 rounded-lg animate-pulse"></div>
-          </div>
-          <div className="card p-6 h-[400px] flex items-center justify-center">
-            <div className="w-full h-full bg-gray-50 rounded-lg animate-pulse"></div>
-          </div>
         </div>
       </div>
     );
   }
 
+  const availableWidgets = [
+    { type: 'total_revenue', title: 'Toplam Ciro', w: 4, h: 3 },
+    { type: 'total_expense', title: 'Toplam Gider', w: 4, h: 3 },
+    { type: 'net_profit', title: 'Net Kar', w: 4, h: 3 },
+    { type: 'critical_stock', title: 'Kritik Stok', w: 4, h: 3 },
+    { type: 'total_stock_value', title: 'Toplam Stok Satış Değeri', w: 4, h: 3 },
+    { type: 'total_stock_cost', title: 'Toplam Stok Maliyeti', w: 4, h: 3 },
+    { type: 'est_gross_profit', title: 'Tahmini Brüt Kar', w: 4, h: 3 },
+    { type: 'avg_profit_margin', title: 'Ortalama Kar Marjı', w: 4, h: 3 },
+    { type: 'monthly_cash', title: 'Kasa Bakiyesi', w: 4, h: 3 },
+    { type: 'pending_payments', title: 'Bekleyen Ödemeler', w: 4, h: 3 },
+    { type: 'financial_trend', title: 'Finansal Trend', w: 6, h: 7 },
+    { type: 'platform_sales', title: 'Platform Satışları', w: 6, h: 7 },
+    { type: 'recent_transactions', title: 'Son İşlemler', w: 6, h: 8 },
+    { type: 'low_stock_list', title: 'Kritik Stok Listesi', w: 6, h: 8 },
+  ];
+
+  const addWidget = async (type: string, w: number, h: number) => {
+    // Check if widget already exists to prevent duplication
+    if (widgets.some(w => w.widget_type === type)) {
+      alert("Bu metrik zaten Dashboard üzerinde bulunuyor.");
+      return;
+    }
+    
+    try {
+      const newWidget = {
+        id: uuidv4(),
+        widget_type: type,
+        position_x: 0,
+        position_y: Infinity, // Add to bottom
+        width: w,
+        height: h,
+        priority_level: 1,
+        is_visible: 1,
+        config: {}
+      };
+      
+      const res = await api.post('/dashboard/widgets', newWidget);
+      newWidget.id = res.id;
+      setWidgets([...widgets, newWidget]);
+    } catch(err) {
+      alert("Failed to add widget");
+    }
+  };
+
+  const applyTemplate = async (templateName: string) => {
+    // Delete all current widgets
+    for (const w of widgets) {
+      try { await api.delete(`/dashboard/widgets/${w.id}`); } catch(e) {}
+    }
+    
+    let newWidgets: any[] = [];
+    if (templateName === 'finance') {
+      newWidgets = [
+        { type: 'total_revenue', x: 0, y: 0, w: 4, h: 3 },
+        { type: 'total_expense', x: 4, y: 0, w: 4, h: 3 },
+        { type: 'net_profit', x: 8, y: 0, w: 4, h: 3 },
+        { type: 'critical_stock', x: 0, y: 3, w: 4, h: 3 },
+        { type: 'total_stock_value', x: 4, y: 3, w: 4, h: 3 },
+        { type: 'total_stock_cost', x: 8, y: 3, w: 4, h: 3 },
+        { type: 'est_gross_profit', x: 0, y: 6, w: 4, h: 3 },
+        { type: 'avg_profit_margin', x: 4, y: 6, w: 4, h: 3 },
+        { type: 'financial_trend', x: 0, y: 9, w: 6, h: 7 },
+        { type: 'platform_sales', x: 6, y: 9, w: 6, h: 7 },
+        { type: 'recent_transactions', x: 0, y: 16, w: 6, h: 8 },
+        { type: 'low_stock_list', x: 6, y: 16, w: 6, h: 8 },
+      ];
+    } else if (templateName === 'stock') {
+      newWidgets = [
+        { type: 'critical_stock', x: 0, y: 0, w: 6, h: 3 },
+        { type: 'low_stock_list', x: 0, y: 3, w: 12, h: 8 },
+      ];
+    } else if (templateName === 'sales') {
+       newWidgets = [
+        { type: 'total_revenue', x: 0, y: 0, w: 4, h: 3 },
+        { type: 'net_profit', x: 4, y: 0, w: 4, h: 3 },
+        { type: 'platform_sales', x: 0, y: 3, w: 8, h: 7 },
+      ];
+    } else if (templateName === 'minimal') {
+      newWidgets = [
+        { type: 'total_revenue', x: 0, y: 0, w: 6, h: 3 },
+        { type: 'total_expense', x: 6, y: 0, w: 6, h: 3 },
+      ];
+    }
+    
+    for (const nw of newWidgets) {
+      await addWidgetRaw(nw.type, nw.w, nw.h, nw.x, nw.y);
+    }
+    loadWidgets();
+  };
+
+  const addWidgetRaw = async (type: string, w: number, h: number, x: number, y: number) => {
+     try {
+      const newWidget = {
+        id: uuidv4(),
+        widget_type: type,
+        position_x: x,
+        position_y: y,
+        width: w,
+        height: h,
+        priority_level: 1,
+        is_visible: 1,
+        config: {}
+      };
+      await api.post('/dashboard/widgets', newWidget);
+     } catch(e) {}
+  };
+
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 relative">
-      {refreshing && (
-        <div className="absolute top-0 right-0 flex items-center space-x-2 text-xs font-semibold text-primary/70">
-          <RefreshCw className="w-4 h-4 animate-spin" />
-          <span>Güncelleniyor...</span>
-        </div>
-      )}
-
-      {/* Metric Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-        <MetricCard 
-          title="Bu Ay Toplam Ciro" 
-          error={error}
-          value={formatCurrency(metrics?.totalRevenue || 0)} 
-          icon={TrendingUp} 
-          trend="↑ 12% Geçen aya göre" 
-          positive 
-          color="text-success"
-          bg="bg-green-50"
-        />
-        <MetricCard 
-          title="Toplam Giderler" 
-          error={error}
-          value={formatCurrency(metrics?.totalExpenses || 0)} 
-          icon={TrendingDown} 
-          trend="↑ 5% Lojistik artışı" 
-          positive={false}
-          color="text-danger"
-          bg="bg-red-50"
-        />
-        <MetricCard 
-          title="Tahmini Net Kar" 
-          error={error}
-          value={formatCurrency(metrics?.netProfit || 0)} 
-          icon={DollarSign} 
-          trend={`Marj: %${metrics?.totalRevenue ? ((metrics.netProfit / metrics.totalRevenue) * 100).toFixed(1) : '0'}`} 
-          positive
-          color="text-primary"
-          bg="bg-blue-50"
-        />
-        <MetricCard 
-          title="Kritik Stok" 
-          error={error}
-          value={`${metrics?.lowStockCount || 0} Ürün`} 
-          icon={AlertTriangle} 
-          trend="Acil sipariş gerekli"
-          positive={false}
-          color="text-danger"
-          bg="bg-orange-50"
-          onClick={() => setShowLowStockModal(true)}
-        />
-        <MetricCard 
-          title="Toplam Stok Satış Değeri" 
-          error={error}
-          value={formatCurrency(metrics?.totalStockSalesValue || 0)} 
-          icon={Package} 
-          trend="Mevcut stokların potansiyel değeri" 
-          positive
-          color="text-purple-600"
-          bg="bg-purple-50"
-        />
-        <MetricCard 
-          title="Toplam Stok Maliyeti" 
-          error={error}
-          value={formatCurrency(metrics?.totalBufferedCostValue || 0)} 
-          icon={Package} 
-          trend="Buffer dahil ortalama stok maliyeti" 
-          positive={false}
-          color="text-orange-600"
-          bg="bg-orange-50"
-        />
-        <MetricCard 
-          title="Tahmini Brüt Kâr" 
-          error={error}
-          value={formatCurrency((metrics?.totalStockSalesValue || 0) - (metrics?.totalBufferedCostValue || 0))} 
-          icon={TrendingUp} 
-          trend="Satıştan beklenen potansiyel brüt kâr" 
-          positive
-          color="text-green-600"
-          bg="bg-green-50"
-        />
-        <MetricCard 
-          title="Ortalama Kâr Marjı" 
-          error={error}
-          value={
-            (metrics?.totalStockSalesValue || 0) > 0 
-              ? `%${((((metrics?.totalStockSalesValue || 0) - (metrics?.totalBufferedCostValue || 0)) / (metrics?.totalStockSalesValue || 0)) * 100).toFixed(1)}` 
-              : "%0.0"
-          }
-          icon={TrendingUp} 
-          trend="Stokların ortalama satış kâr marjı" 
-          positive
-          color="text-blue-600"
-          bg="bg-blue-50"
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Chart */}
-        <div className="lg:col-span-2 card p-6">
-          <div className="flex items-center justify-between mb-8 pb-4 border-b border-border-color">
-            <h3 className="text-base font-semibold text-text-main">Finansal Gelişim (Son 6 Ay)</h3>
-            <div className="flex items-center space-x-4 text-[11px] font-bold uppercase tracking-wider text-text-muted">
-              <span className="flex items-center"><span className="w-2.5 h-2.5 bg-success rounded-full mr-2"></span> Gelir</span>
-              <span className="flex items-center"><span className="w-2.5 h-2.5 bg-danger rounded-full mr-2"></span> Gider</span>
-            </div>
-          </div>
-          <div className="h-[280px]">
-             {error ? (
-               <div className="h-full flex items-center justify-center text-sm font-semibold text-text-muted">Veri alınamadı</div>
-             ) : (
-               <Line data={lineChartData} options={barChartOptions} />
-             )}
-          </div>
-        </div>
-
-        {/* Platform Revenue */}
-        <div className="card p-6">
-          <h3 className="text-base font-semibold text-text-main mb-8 pb-4 border-b border-border-color">Platform Bazlı Satış</h3>
-          <div className="h-[280px]">
-             {error ? (
-               <div className="h-full flex items-center justify-center text-sm font-semibold text-text-muted">Veri alınamadı</div>
-             ) : (
-               <Bar data={platformChartData} options={barChartOptions} />
-             )}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Transactions */}
-        <div className="card">
-          <div className="px-6 py-4 border-b border-border-color flex items-center justify-between bg-white">
-            <h3 className="font-semibold text-text-main">Son İşlemler</h3>
-            <button 
-              onClick={() => onNavigate('income-expense')}
-              className="text-xs font-semibold text-primary hover:underline"
-            >
-              Hepsini Gör
-            </button>
-          </div>
-          <div className="overflow-x-auto min-h-[200px]">
-            {error ? (
-               <div className="p-8 text-center text-sm font-semibold text-text-muted">Veri alınamadı</div>
-            ) : (
-            <table className="w-full text-left">
-              <thead>
-                <tr className="bg-bg-main text-[11px] uppercase tracking-wider text-text-muted font-bold">
-                  <th className="px-4 lg:px-6 py-3">Tarih</th>
-                  <th className="px-4 lg:px-6 py-3">Kategori</th>
-                  <th className="px-4 lg:px-6 py-3">Tutar</th>
-                  <th className="px-4 lg:px-6 py-3 hidden sm:table-cell">Platform</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border-color">
-                {recentTransactions.map((tx: any) => (
-                  <tr key={tx.id} className="hover:bg-bg-main transition-colors text-sm">
-                    <td className="px-4 lg:px-6 py-4 text-text-muted">{new Date(tx.date).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' })}</td>
-                    <td className="px-4 lg:px-6 py-4 font-medium">{tx.category}</td>
-                    <td className={cn("px-4 lg:px-6 py-4 font-bold", tx.type === 'Income' ? 'text-success' : 'text-danger')}>
-                      {tx.type === 'Income' ? '+' : '-'}{formatCurrency(tx.amount)}
-                    </td>
-                    <td className="px-4 lg:px-6 py-4 hidden sm:table-cell">
-                      <span className="px-2 py-0.5 rounded bg-bg-main border border-border-color text-text-main text-[10px] font-bold uppercase tracking-tight">
-                        {tx.platform}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            )}
-          </div>
-        </div>
-
-        {/* Low Stock Alerts */}
-        <div className="card">
-          <div className="px-6 py-4 border-b border-border-color flex items-center justify-between">
-            <h3 className="font-semibold text-text-main">Kritik Stok Uyarıları</h3>
-            <button 
-              onClick={() => loadData(true)}
-              className="text-xs font-semibold text-primary hover:underline flex items-center"
-            >
-              <RefreshCw className={cn("w-3 h-3 mr-1", refreshing && "animate-spin")} /> Yenile
-            </button>
-          </div>
-          <div className="p-2 space-y-1 min-h-[200px]">
-             {error ? (
-                <div className="py-12 text-center text-sm font-semibold text-text-muted">Veri alınamadı</div>
-             ) : (
-               <>
-                 {lowStockProducts.slice(0, 5).map((p: any) => (
-                   <div 
-                     key={p.id} 
-                     onClick={() => onProductClick(p.id)}
-                     className="flex items-center justify-between p-4 hover:bg-bg-main rounded-lg border border-transparent cursor-pointer transition-all group"
-                   >
-                     <div className="flex items-center space-x-4">
-                       <div className="w-10 h-10 bg-bg-main rounded-lg flex items-center justify-center overflow-hidden border border-border-color">
-                          {p.cover_image ? (
-                            <img src={p.cover_image} className="w-full h-full object-cover" />
-                          ) : (
-                            <Package className="w-5 h-5 text-text-muted" />
-                          )}
-                       </div>
-                       <div>
-                         <p className="text-sm font-semibold text-text-main group-hover:text-primary">{p.title}</p>
-                         <p className="text-[10px] text-text-muted font-mono">{p.sku}</p>
-                       </div>
+    <div className="space-y-4 animate-in fade-in duration-500 pb-12">
+      <div className="flex justify-between items-center mb-6 px-2">
+        <h2 className="text-2xl font-black text-gray-900">Dashboard</h2>
+        <div className="flex items-center gap-3">
+          {editMode ? (
+            <>
+              {/* Templates Dropdown */}
+              <div className="relative group">
+                <button className="px-4 py-2 text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors flex items-center gap-2">
+                   Hazır Şablonlar
+                </button>
+                <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-100 p-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
+                   <button onClick={() => applyTemplate('finance')} className="w-full text-left px-3 py-2 text-sm font-medium text-gray-700 hover:bg-blue-50 rounded-lg transition-colors">Finans Dashboard</button>
+                   <button onClick={() => applyTemplate('sales')} className="w-full text-left px-3 py-2 text-sm font-medium text-gray-700 hover:bg-blue-50 rounded-lg transition-colors">Satış Dashboard</button>
+                   <button onClick={() => applyTemplate('stock')} className="w-full text-left px-3 py-2 text-sm font-medium text-gray-700 hover:bg-blue-50 rounded-lg transition-colors">Stok Dashboard</button>
+                   <button onClick={() => applyTemplate('minimal')} className="w-full text-left px-3 py-2 text-sm font-medium text-gray-700 hover:bg-blue-50 rounded-lg transition-colors">Minimal</button>
+                </div>
+              </div>
+              
+              {/* Add Widget Dropdown */}
+              <div className="relative group">
+                <button className="px-4 py-2 text-sm font-bold text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 shadow-sm rounded-xl transition-colors flex items-center gap-2">
+                  <Plus className="w-4 h-4" /> Ekle
+                </button>
+                <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-lg border border-gray-100 p-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
+                     <div className="max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
+                       {availableWidgets.map(aw => {
+                         const exists = widgets.some((w: any) => w.widget_type === aw.type);
+                         return (
+                           <button 
+                             key={aw.type}
+                             onClick={() => addWidget(aw.type, aw.w, aw.h)}
+                             disabled={exists}
+                             className={`w-full text-left px-3 py-2 text-sm font-medium rounded-lg transition-colors ${exists ? 'text-gray-400 cursor-not-allowed bg-gray-50' : 'text-gray-700 hover:bg-blue-50 hover:text-blue-700'}`}
+                           >
+                             {aw.title} {exists && <span className="text-[10px] ml-1">(Eklendi)</span>}
+                           </button>
+                         );
+                       })}
                      </div>
-                     <div className="text-right">
-                        <p className="text-sm font-bold text-danger">{p.total_stock} Adet</p>
-                        <p className="text-[9px] text-text-muted uppercase font-bold tracking-tight">Acil Sipariş</p>
-                     </div>
-                   </div>
-                 ))}
-                 {lowStockProducts.length > 5 && (
-                   <button 
-                     onClick={() => setShowLowStockModal(true)}
-                     className="w-full text-center py-3 text-xs font-bold text-primary hover:bg-bg-main rounded-lg transition-colors border border-dashed border-border-color mt-2"
-                   >
-                     Tüm {lowStockProducts.length} Ürünü Gör
-                   </button>
-                 )}
-                 {lowStockProducts.length === 0 && (
-                   <div className="py-12 text-center">
-                     <Package className="w-10 h-10 text-border-color mx-auto mb-3" />
-                     <p className="text-text-muted text-xs">Tüm stoklar güvenli seviyede.</p>
-                   </div>
-                 )}
-               </>
-             )}
-          </div>
+                </div>
+              </div>
+              <button 
+                onClick={() => { setEditMode(false); loadWidgets(); }}
+                className="px-4 py-2 text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors"
+               >
+                İptal
+              </button>
+              <button 
+                onClick={applyChanges}
+                className="px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors flex items-center gap-2"
+               >
+                <Check className="w-4 h-4" />
+                Kaydet
+              </button>
+            </>
+          ) : !isMobile && (
+            <button 
+              onClick={() => setEditMode(true)}
+              className="px-4 py-2 text-sm font-bold text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 shadow-sm rounded-xl transition-colors flex items-center gap-2"
+             >
+              <Edit className="w-4 h-4" />
+              Düzenle
+            </button>
+          )}
         </div>
       </div>
 
-      {showLowStockModal && (
-        <div className="fixed inset-0 bg-[#0F172A]/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in duration-300 flex flex-col max-h-[85vh]">
-            <div className="p-6 border-b border-border-color bg-gray-50 flex items-center justify-between shrink-0">
-               <div>
-                  <h3 className="text-xl font-black text-[#0F172A] tracking-tight">Kritik Stoktaki Ürünler</h3>
-                  <p className="text-sm text-text-muted mt-1">Stok seviyesi kritik olan tüm ürünler ({lowStockProducts.length} adet)</p>
-               </div>
-               <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center border border-border-color shadow-sm text-danger">
-                  <AlertTriangle className="w-6 h-6" />
-               </div>
+      <div className="w-full max-w-full overflow-x-hidden p-1">
+        <div ref={containerRef} className="w-full min-h-[500px]">
+          {isMobile ? (
+            <div className="flex flex-col gap-4">
+              {[...widgets]
+                .sort((a,b) => a.position_y - b.position_y || a.position_x - b.position_x)
+                .map((widget) => {
+                  let mobileHeightClass = "h-auto min-h-[140px]";
+                  if (['financial_trend', 'platform_sales'].includes(widget.widget_type)) mobileHeightClass = "h-[300px]";
+                  if (['recent_transactions', 'low_stock_list'].includes(widget.widget_type)) mobileHeightClass = "h-[450px]";
+                  
+                  return (
+                    <div 
+                       key={widget.id} 
+                       className={`relative flex flex-col w-full ${mobileHeightClass}`}
+                    >
+                      <div className="flex-1 overflow-hidden min-w-[0] min-h-[0] h-full flex flex-col">
+                        <WidgetRenderer 
+                          widget={widget} 
+                          data={data} 
+                          m={m} 
+                          FormatAmount={FormatAmount} 
+                          onNavigate={onNavigate}
+                          getGrossProfitEstimate={getGrossProfitEstimate}
+                          getAvgMarginEstimate={getAvgMarginEstimate}
+                        />
+                      </div>
+                    </div>
+                  );
+              })}
             </div>
-            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2">
-              {lowStockProducts.map((p: any) => (
+          ) : (
+            <>
+              {/* @ts-ignore */}
+              <Responsive
+                className="layout"
+                width={width}
+              layouts={{ lg: widgets.map(w => ({ i: w.id, x: w.position_x, y: w.position_y, w: w.width, h: w.height, static: !editMode })) }}
+              breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+              cols={{ lg: 12, md: 12, sm: 6, xs: 1, xxs: 1 }}
+                rowHeight={60}
+                onLayoutChange={(layout) => saveLayout(layout)}
+                isDraggable={editMode}
+                isResizable={editMode}
+                margin={[24, 24]}
+              >
+              {widgets.map((widget) => (
                 <div 
-                  key={p.id} 
-                  onClick={() => {
-                    setShowLowStockModal(false);
-                    onProductClick(p.id);
-                  }}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between p-4 hover:bg-bg-main rounded-xl border border-border-color cursor-pointer transition-all group gap-4"
+                   key={widget.id} 
+                   className="relative group flex flex-col min-w-[0] min-h-[0]"
+                   data-grid={{ x: widget.position_x, y: widget.position_y, w: widget.width, h: widget.height, static: !editMode }}
                 >
-                  <div className="flex items-center space-x-4">
-                    <div className="w-12 h-12 bg-white rounded-lg flex items-center justify-center overflow-hidden border border-border-color shrink-0">
-                       {p.cover_image ? (
-                         <img src={p.cover_image} className="w-full h-full object-cover" />
-                       ) : (
-                         <Package className="w-6 h-6 text-text-muted" />
-                       )}
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-text-main group-hover:text-primary transition-colors">{p.title}</p>
-                      <p className="text-[11px] text-text-muted font-mono mt-0.5">{p.sku}</p>
-                    </div>
+                  <div className="flex-1 overflow-hidden min-w-[0] min-h-[0]">
+                    <WidgetRenderer 
+                      widget={widget} 
+                      data={data} 
+                      m={m} 
+                      FormatAmount={FormatAmount} 
+                      onNavigate={onNavigate}
+                      getGrossProfitEstimate={getGrossProfitEstimate}
+                      getAvgMarginEstimate={getAvgMarginEstimate}
+                    />
                   </div>
-                  <div className="flex items-center sm:block sm:text-right w-full sm:w-auto mt-2 sm:mt-0 pt-2 sm:pt-0 border-t border-border-color sm:border-0 justify-between">
-                     <p className="text-sm font-black text-danger">{p.total_stock} Adet</p>
-                     <p className="text-[10px] text-text-muted uppercase font-bold tracking-tight bg-orange-100 text-orange-700 px-2 py-0.5 rounded ml-2 sm:ml-0 sm:mt-1 inline-block">Acil Sipariş</p>
-                  </div>
+                  {editMode && (
+                    <div className="absolute top-2 right-2 flex gap-1 bg-white/90 backdrop-blur shadow-sm border border-gray-200 p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                       <button onClick={() => setShowConfig(widget.id)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-md">
+                         <Settings className="w-4 h-4" />
+                       </button>
+                       <button onClick={() => removeWidget(widget.id)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-md" onMouseDown={(e) => e.stopPropagation()}>
+                         <Trash2 className="w-4 h-4" />
+                       </button>
+                    </div>
+                  )}
+                  {editMode && (
+                    <div className="absolute inset-0 bg-blue-500/5 border-2 border-blue-500 border-dashed rounded-2xl pointer-events-none z-10" />
+                  )}
                 </div>
               ))}
-            </div>
-            <div className="p-6 bg-gray-50 border-t border-border-color shrink-0 text-right">
-               <button 
-                 onClick={() => setShowLowStockModal(false)}
-                 className="px-8 h-12 bg-[#0F172A] text-white rounded-xl font-bold text-sm shadow-xl hover:scale-105 transition-all"
-               >
-                 Kapat
-               </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MetricCard({ title, value, icon: Icon, trend, positive, color, bg, onClick, error }: any) {
-  return (
-    <div 
-      onClick={onClick}
-      className={cn(
-        "p-5 rounded-xl bg-white border border-border-color shadow-sm transition-all",
-        onClick && "cursor-pointer hover:shadow-md"
-      )}
-    >
-      <div className="flex items-center justify-between mb-4">
-        <div className={cn("p-2.5 rounded-lg", bg)}>
-          <Icon className={cn("w-4 h-4", color)} />
+            </Responsive>
+            </>
+          )}
         </div>
       </div>
-      <p className="text-[11px] font-bold text-text-muted uppercase tracking-wider mb-1">{title}</p>
-      {error ? (
-        <h2 className="text-sm font-bold tracking-tight text-text-muted mt-2">Veri alınamadı</h2>
-      ) : (
-        <>
-          <h2 className={cn("text-2xl font-bold tracking-tight", title === 'Kritik Stok' && parseInt(value) > 0 ? 'text-danger' : 'text-text-main')}>{value}</h2>
-          <div className={cn(
-            "mt-2 text-[11px] font-semibold",
-            positive ? "text-success" : (title === 'Kritik Stok' ? 'text-text-muted' : 'text-danger')
-          )}>
-             {trend}
-          </div>
-        </>
+
+      {showConfig && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm animate-in fade-in">
+           <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col">
+              <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                 <h3 className="font-bold text-gray-900">Widget Ayarları</h3>
+                 <button onClick={() => setShowConfig(null)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
+                    <X className="w-5 h-5" />
+                 </button>
+              </div>
+              <div className="p-6 space-y-5">
+                 {widgets.find((w: any) => w.id === showConfig) && (
+                    <div className="space-y-4">
+                       <div>
+                          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Başlık</label>
+                          <input 
+                            type="text" 
+                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                            value={widgets.find((w: any) => w.id === showConfig).config.title || ''}
+                            onChange={(e) => {
+                               const fw = widgets.find((w: any) => w.id === showConfig);
+                               if (fw) {
+                                  fw.config.title = e.target.value;
+                                  setWidgets([...widgets]);
+                               }
+                            }}
+                            placeholder="Otomatik Başlık"
+                          />
+                       </div>
+                       <div>
+                          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Önem Derecesi (Priority)</label>
+                          <select
+                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                            value={widgets.find((w: any) => w.id === showConfig).priority_level || 1}
+                            onChange={(e) => {
+                               const fw = widgets.find((w: any) => w.id === showConfig);
+                               if (fw) {
+                                  fw.priority_level = parseInt(e.target.value);
+                                  setWidgets([...widgets]);
+                               }
+                            }}
+                          >
+                             <option value={1}>1 - Düşük</option>
+                             <option value={2}>2 - Normal</option>
+                             <option value={3}>3 - Yüksek</option>
+                             <option value={4}>4 - Çok Yüksek</option>
+                             <option value={5}>5 - Kritik (Hero)</option>
+                          </select>
+                       </div>
+                    </div>
+                 )}
+              </div>
+              <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex justify-end">
+                 <button onClick={() => setShowConfig(null)} className="px-6 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition-colors">
+                    Tamam
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {!widgets.length && !loading && (
+        <div className="text-center py-20 text-gray-500">
+           <p className="mb-4">Dashboard henüz boş.</p>
+           {editMode && <p>Sağ üstten widget ekleyebilirsiniz.</p>}
+        </div>
       )}
     </div>
   );

@@ -82,7 +82,7 @@ export default function B2BFirms({ onFirmClick, onAddFirm }: any) {
       </div>
 
       <div className="card overflow-x-auto text-sm">
-        <table className="w-full text-left">
+        <table className="w-full text-left min-w-[800px]">
           <thead>
             <tr className="bg-bg-main text-text-muted uppercase tracking-widest text-[10px] font-bold border-b border-border-color">
               <th className="px-6 py-4">Firma Adı</th>

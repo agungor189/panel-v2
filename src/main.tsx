@@ -1,6 +1,7 @@
 import React, { StrictMode, Component, ErrorInfo } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
+import { CurrencyProvider } from './CurrencyContext.tsx';
 import './index.css';
 
 class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
@@ -32,7 +33,9 @@ class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError:
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      <CurrencyProvider>
+        <App />
+      </CurrencyProvider>
     </ErrorBoundary>
   </StrictMode>
 );

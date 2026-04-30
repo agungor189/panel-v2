@@ -303,7 +303,7 @@ export default function ActivityLogs() {
           <div className="text-center py-16 text-text-muted font-bold text-lg">Kayıt bulunamadı.</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="w-full text-left border-collapse min-w-[800px]">
               <thead>
                 <tr className="border-b-2 border-border-color">
                   <th className="pb-4 pt-2 px-4 font-black text-xs text-text-muted uppercase tracking-wider">Tarih</th>

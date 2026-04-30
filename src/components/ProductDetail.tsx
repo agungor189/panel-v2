@@ -14,7 +14,8 @@ import {
   History,
   Info,
 } from 'lucide-react';
-import { api, formatCurrency, PLATFORMS } from '../lib/api';
+import { api, PLATFORMS } from '../lib/api';
+import { useCurrency } from '../CurrencyContext';
 import { Product, ProductPlatform } from '../types';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -30,6 +31,7 @@ interface ProductDetailProps {
 }
 
 export default function ProductDetail({ productId, onBack, onEdit }: ProductDetailProps) {
+  const { FormatAmount } = useCurrency();
   const [product, setProduct] = useState<Product | null>(null);
   const [activeImage, setActiveImage] = useState<string | null>(null);
   const [stockLogs, setStockLogs] = useState<any[]>([]);
@@ -202,20 +204,20 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6 py-6 border-y border-border-color">
-                <DetailStat label="Satış Fiyatı" value={formatCurrency(product.sale_price)} color="text-primary font-black" />
+                <DetailStat label="Satış Fiyatı" value={<FormatAmount amount={product.sale_price} />} color="text-primary font-black" />
                 <DetailStat label="Ağırlık" value={`${product.weight} gr`} color="text-text-muted" />
                 <DetailStat label="Alış ($)" value={`$${product.purchase_price_usd.toFixed(2)}`} color="text-text-muted" subLabel={`₺${product.exchange_rate_used} kur ile`} />
-                <DetailStat label="Maliyet (₺)" value={formatCurrency(product.purchase_cost)} color="text-text-muted" />
+                <DetailStat label="Maliyet (₺)" value={<FormatAmount amount={product.purchase_cost} />} color="text-text-muted" />
                 <DetailStat 
                   label="Buffer Maliyet" 
-                  value={formatCurrency(product.purchase_cost * (1 + (product.buffer_percentage || 0) / 100))} 
+                  value={<FormatAmount amount={product.purchase_cost * (1 + (product.buffer_percentage || 0) / 100)} />} 
                   subLabel={`%${product.buffer_percentage} Buffer`} 
                   color="text-orange-600" 
                 />
                 <DetailStat 
                   label="Kar Payı" 
-                  value={formatCurrency(profit)} 
-                  subLabel={`%${product.profit_percentage || 0} Kar`} 
+                  value={<FormatAmount amount={profit} />} 
+                  subLabel={`%${product.sale_price ? ((profit / product.sale_price) * 100).toFixed(1) : 0} Marj`} 
                   color="text-success" 
                 />
               </div>
@@ -268,7 +270,7 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
   );
 }
 
-function DetailStat({ label, value, subLabel, color }: { label: string, value: string, subLabel?: string, color: string }) {
+function DetailStat({ label, value, subLabel, color }: { label: string, value: React.ReactNode, subLabel?: string, color: string }) {
   return (
     <div>
       <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider mb-2">{label}</p>

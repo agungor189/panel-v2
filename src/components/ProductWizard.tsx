@@ -40,7 +40,9 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
     purchase_cost: 0,
     sale_price: 0,
     buffer_percentage: settings?.default_buffer_percentage || 0,
+    profit_percentage: settings?.default_profit_percentage || 0,
     exchange_rate_used: settings?.usd_exchange_rate || 0,
+    price_locked: false,
     weight: 0,
     status: 'Active',
     notes: '',
@@ -53,7 +55,8 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
         ...prev, 
         category: prev.category || settings.product_categories[0],
         exchange_rate_used: settings.usd_exchange_rate,
-        buffer_percentage: settings.default_buffer_percentage
+        buffer_percentage: settings.default_buffer_percentage,
+        profit_percentage: settings.default_profit_percentage || 0
       }));
     }
   }, [settings, productId]);
