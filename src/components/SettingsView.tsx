@@ -308,33 +308,54 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
          </div>
       </div>
 
-      <div className="p-6 bg-red-50/50 border border-red-100 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-         <div className="flex items-start md:items-center">
-           <AlertCircle className="w-5 h-5 text-danger mr-4 mt-1 md:mt-0" />
-           <div>
-              <h4 className="text-sm font-bold text-danger uppercase tracking-tight">Veritabanı Bakımı & Yedekleme</h4>
-              <p className="text-xs text-text-muted mt-0.5">Olası çökme ve veri kayıplarına karşı yedek alabilirsiniz. Aldığınız yedeği "Geri Yükle" ile tekrar sisteme aktarabilirsiniz (Bu işlem mevcut verileri siler).</p>
-           </div>
-         </div>
-         <div className="flex items-center gap-3 w-full md:w-auto">
-           <label className="px-5 py-2 cursor-pointer bg-white border border-red-200 text-danger rounded-xl text-[11px] font-bold uppercase tracking-widest hover:bg-danger/10 transition-all shadow-sm active:scale-95 text-center flex-1 md:flex-none">
-             Geri Yükle
-             <input type="file" accept=".zip" className="hidden" onClick={(e) => (e.target as HTMLInputElement).value = ''} onChange={(e) => {
-               const file = e.target.files?.[0];
-               if (!file) return;
-               
-               setConfirmRestoreFile(file);
-             }} />
-           </label>
-           <button 
-             onClick={() => {
-               window.location.href = '/api/backup/download';
-             }}
-             className="px-5 py-2 bg-danger border border-transparent text-white rounded-xl text-[11px] font-bold uppercase tracking-widest hover:bg-red-700 transition-all shadow-sm active:scale-95 text-center flex-1 md:flex-none"
-           >
-             Yedek İndir
-           </button>
-         </div>
+      <div className="card overflow-hidden divide-y divide-border-color mt-8 space-y-0">
+          <div className="p-6 bg-red-50/50 border border-red-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+             <div className="flex items-start md:items-center">
+               <AlertCircle className="w-5 h-5 text-danger mr-4 mt-1 md:mt-0" />
+               <div>
+                  <h4 className="text-sm font-bold text-danger uppercase tracking-tight">Veritabanı Bakımı & Yedekleme</h4>
+                  <p className="text-xs text-text-muted mt-0.5">Olası çökme ve veri kayıplarına karşı yedek alabilirsiniz. Aldığınız yedeği "Geri Yükle" ile tekrar sisteme aktarabilirsiniz (Bu işlem mevcut verileri siler).</p>
+               </div>
+             </div>
+             <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+               <button 
+                 onClick={async () => {
+                    if (window.confirm("Bu işlem eski formatta kalmış ürün fiyatlarını yeni fiyat yönetimine entegre edecektir. Onaylıyor musunuz?")) {
+                       setLoading(true);
+                       try {
+                          const res = await api.post('/api/maintenance/fix-pricing', {});
+                          alert(res.message || "Fiyatlar onarıldı.");
+                          onUpdate();
+                       } catch(e: any) {
+                          alert(e.message || "Hata oluştu");
+                       } finally {
+                          setLoading(false);
+                       }
+                    }
+                 }}
+                 className="px-5 py-2 bg-white border border-red-200 text-danger rounded-xl text-[11px] font-bold uppercase tracking-widest hover:bg-danger/10 transition-all shadow-sm active:scale-95 text-center flex-1 md:flex-none"
+               >
+                 Fiyat Verilerini Onar
+               </button>
+               <label className="px-5 py-2 cursor-pointer bg-white border border-red-200 text-danger rounded-xl text-[11px] font-bold uppercase tracking-widest hover:bg-danger/10 transition-all shadow-sm active:scale-95 text-center flex-1 md:flex-none">
+                 Geri Yükle
+                 <input type="file" accept=".zip" className="hidden" onClick={(e) => (e.target as HTMLInputElement).value = ''} onChange={(e) => {
+                   const file = e.target.files?.[0];
+                   if (!file) return;
+                   
+                   setConfirmRestoreFile(file);
+                 }} />
+               </label>
+               <button 
+                 onClick={() => {
+                   window.location.href = '/api/backup/download';
+                 }}
+                 className="px-5 py-2 bg-danger border border-transparent text-white rounded-xl text-[11px] font-bold uppercase tracking-widest hover:bg-red-700 transition-all shadow-sm active:scale-95 text-center flex-1 md:flex-none"
+               >
+                 Yedek İndir
+               </button>
+             </div>
+          </div>
       </div>
 
       {confirmRestoreFile && (

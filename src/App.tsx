@@ -76,6 +76,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [selectedFirmId, setSelectedFirmId] = useState<string | null>(null);
+  const [analyticsTab, setAnalyticsTab] = useState<string | undefined>(undefined);
   const [showFirmAdd, setShowFirmAdd] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
@@ -150,6 +151,11 @@ export default function App() {
   const navigateToProduct = (id: string) => {
     setSelectedProductId(id);
     setCurrentView('product-detail');
+  };
+
+  const navigateToAnalytics = (tab: string) => {
+    setAnalyticsTab(tab);
+    setCurrentView('analytics');
   };
 
   const navItems = [
@@ -451,7 +457,7 @@ export default function App() {
 
         {/* View Container */}
         <div className="p-4 md:p-6 flex-1 max-w-[1600px] w-full mx-auto">
-          {currentView === 'dashboard' && <Dashboard onNavigate={setCurrentView} onProductClick={navigateToProduct} />}
+          {currentView === 'dashboard' && <Dashboard onNavigate={setCurrentView} onNavigateAnalytics={navigateToAnalytics} onProductClick={navigateToProduct} />}
           {currentView === 'products' && (
             <ProductList 
               onAddProduct={() => setCurrentView('product-wizard')} 
@@ -495,7 +501,7 @@ export default function App() {
           {currentView === 'income' && <Transactions initialType="Income" settings={settings} />}
           {currentView === 'expense' && <Expenses settings={settings} />}
           {currentView === 'recurring' && <RecurringPayments settings={settings} />}
-          {currentView === 'analytics' && <Analytics settings={settings} />}
+          {currentView === 'analytics' && <Analytics settings={settings} initialTab={analyticsTab} />}
           {currentView === 'activity-logs' && <ActivityLogs />}
           {currentView === 'settings' && <SettingsView onUpdate={loadSettings} />}
           {currentView === 'api-keys' && <ApiKeys />}

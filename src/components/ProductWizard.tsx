@@ -342,7 +342,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
                           ...prev, 
                           purchase_price_usd: usd, 
                           purchase_cost: costTl,
-                          sale_price: prev.price_locked ? prev.sale_price : Math.ceil(saleTl)
+                          sale_price: prev.price_locked ? prev.sale_price : (saleTl > 0 ? Math.ceil(saleTl) : prev.sale_price)
                         }));
                       }}
                       className="form-input pl-10 font-black text-lg" 
@@ -366,7 +366,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
                           ...prev, 
                           exchange_rate_used: rate, 
                           purchase_cost: costTl,
-                          sale_price: prev.price_locked ? prev.sale_price : Math.ceil(saleTl)
+                          sale_price: prev.price_locked ? prev.sale_price : (saleTl > 0 ? Math.ceil(saleTl) : prev.sale_price)
                         }));
                       }}
                       className="form-input pl-10 font-bold" 
@@ -387,7 +387,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
                         setFormData((prev: any) => ({ 
                           ...prev, 
                           buffer_percentage: buff, 
-                          sale_price: prev.price_locked ? prev.sale_price : Math.ceil(saleTl)
+                          sale_price: prev.price_locked ? prev.sale_price : (saleTl > 0 ? Math.ceil(saleTl) : prev.sale_price)
                         }));
                       }}
                       className="form-input pr-10 font-bold text-orange-600" 
@@ -408,7 +408,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
                         setFormData((prev: any) => ({ 
                           ...prev, 
                           profit_percentage: profit, 
-                          sale_price: prev.price_locked ? prev.sale_price : Math.ceil(saleTl)
+                          sale_price: prev.price_locked ? prev.sale_price : (saleTl > 0 ? Math.ceil(saleTl) : prev.sale_price)
                         }));
                       }}
                       className="form-input pr-10 font-bold text-green-600" 

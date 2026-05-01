@@ -19,12 +19,15 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 
-export function WidgetRenderer({ widget, data, m, FormatAmount, onNavigate, getGrossProfitEstimate, getAvgMarginEstimate }: any) {
+export function WidgetRenderer({ widget, data, m, FormatAmount, onNavigate, onNavigateAnalytics, onProductClick, getGrossProfitEstimate, getAvgMarginEstimate }: any) {
   if (widget.widget_type === 'total_revenue') {
     return (
-      <div className="w-full h-full p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col">
+      <div 
+        onClick={() => onNavigateAnalytics?.('financial')}
+        className="w-full h-full p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col cursor-pointer hover:border-blue-300 hover:shadow-md transition-all group"
+      >
          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 group-hover:bg-emerald-100 transition-colors">
                <TrendingUp className="w-4 h-4" />
             </div>
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider leading-tight">{widget.config.title || 'BU AY TOPLAM CİRO'}</h3>
@@ -39,9 +42,12 @@ export function WidgetRenderer({ widget, data, m, FormatAmount, onNavigate, getG
   
   if (widget.widget_type === 'total_expense') {
     return (
-      <div className="w-full h-full p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col">
+      <div 
+        onClick={() => onNavigate('expense')}
+        className="w-full h-full p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col cursor-pointer hover:border-red-300 hover:shadow-md transition-all group"
+      >
          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center shrink-0 group-hover:bg-red-100 transition-colors">
                <TrendingDown className="w-4 h-4" />
             </div>
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider leading-tight">{widget.config.title || 'TOPLAM GİDERLER'}</h3>
@@ -56,9 +62,12 @@ export function WidgetRenderer({ widget, data, m, FormatAmount, onNavigate, getG
 
   if (widget.widget_type === 'net_profit') {
     return (
-      <div className="w-full h-full p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col">
+      <div 
+        onClick={() => onNavigateAnalytics?.('financial')}
+        className="w-full h-full p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col cursor-pointer hover:border-blue-300 hover:shadow-md transition-all group"
+      >
          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 group-hover:bg-blue-100 transition-colors">
                <DollarSign className="w-4 h-4" />
             </div>
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider leading-tight">{widget.config.title || 'TAHMİNİ NET KAR'}</h3>
@@ -73,9 +82,12 @@ export function WidgetRenderer({ widget, data, m, FormatAmount, onNavigate, getG
 
   if (widget.widget_type === 'critical_stock') {
     return (
-      <div className="w-full h-full p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col">
+      <div 
+        onClick={() => onNavigateAnalytics?.('risk')}
+        className="w-full h-full p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col cursor-pointer hover:border-orange-300 hover:shadow-md transition-all group"
+      >
          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center shrink-0 group-hover:bg-orange-100 transition-colors">
                <AlertTriangle className="w-4 h-4" />
             </div>
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider leading-tight">{widget.config.title || 'KRİTİK STOK'}</h3>
@@ -90,9 +102,12 @@ export function WidgetRenderer({ widget, data, m, FormatAmount, onNavigate, getG
 
   if (widget.widget_type === 'total_stock_value') {
     return (
-      <div className="w-full h-full p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col">
+      <div 
+        onClick={() => onNavigateAnalytics?.('products')}
+        className="w-full h-full p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col cursor-pointer hover:border-purple-300 hover:shadow-md transition-all group"
+      >
          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center shrink-0 group-hover:bg-purple-100 transition-colors">
                <Package className="w-4 h-4" />
             </div>
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider leading-tight">{widget.config.title || 'TOPLAM STOK SATIŞ DEĞERİ'}</h3>
@@ -107,9 +122,12 @@ export function WidgetRenderer({ widget, data, m, FormatAmount, onNavigate, getG
 
   if (widget.widget_type === 'total_stock_cost') {
     return (
-      <div className="w-full h-full p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col">
+      <div 
+        onClick={() => onNavigateAnalytics?.('products')}
+        className="w-full h-full p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col cursor-pointer hover:border-orange-300 hover:shadow-md transition-all group"
+      >
          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center shrink-0 group-hover:bg-orange-100 transition-colors">
                <Package className="w-4 h-4" />
             </div>
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider leading-tight">{widget.config.title || 'TOPLAM STOK MALİYETİ'}</h3>
@@ -221,7 +239,10 @@ export function WidgetRenderer({ widget, data, m, FormatAmount, onNavigate, getG
 
   if (widget.widget_type === 'platform_sales') {
     return (
-       <div className="w-full h-full p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col">
+       <div 
+         onClick={() => onNavigateAnalytics?.('platform')}
+         className="w-full h-full p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col cursor-pointer hover:border-blue-300 hover:shadow-md transition-all"
+       >
           <h3 className="font-bold text-gray-900 text-lg mb-6">{widget.config.title || 'Platform Satışları'}</h3>
           <div className="flex-1 min-h-[150px]">
             <ResponsiveContainer width="100%" height="100%">

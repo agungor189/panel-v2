@@ -7,6 +7,12 @@ export interface Product {
   barcode: string;
   category: string;
   model: string;
+  material?: string;
+  size?: string;
+  connection_type?: string;
+  usage_area?: string;
+  supplier?: string;
+  min_stock_level?: number;
   description: string;
   purchase_price_usd: number;
   purchase_cost: number;

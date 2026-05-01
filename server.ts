@@ -353,6 +353,17 @@ try { db.exec("ALTER TABLE sales ADD COLUMN commission_rate REAL DEFAULT 0"); } 
 try { db.exec("ALTER TABLE sales ADD COLUMN shipping_cost REAL DEFAULT 0"); } catch(e) {}
 try { db.exec("ALTER TABLE sales ADD COLUMN discount REAL DEFAULT 0"); } catch(e) {}
 try { db.exec("ALTER TABLE sales ADD COLUMN net_profit REAL DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE sales ADD COLUMN packaging_cost REAL DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE sales ADD COLUMN ad_spend REAL DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE sales ADD COLUMN other_expenses REAL DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE sales ADD COLUMN net_total REAL DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE sales ADD COLUMN gross_profit REAL DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE products ADD COLUMN material TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE products ADD COLUMN size TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE products ADD COLUMN connection_type TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE products ADD COLUMN usage_area TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE products ADD COLUMN supplier TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE products ADD COLUMN min_stock_level INTEGER DEFAULT 5"); } catch(e) {}
 
 try { db.exec("ALTER TABLE sale_items ADD COLUMN unit_price REAL DEFAULT 0"); } catch(e) {}
 try { db.exec("ALTER TABLE sale_items ADD COLUMN purchase_cost REAL DEFAULT 0"); } catch(e) {}
@@ -369,11 +380,6 @@ try { db.exec("ALTER TABLE transactions ADD COLUMN document_url TEXT"); } catch(
 try { db.exec("ALTER TABLE transactions ADD COLUMN currency TEXT DEFAULT 'TRY'"); } catch(e) {}
 try { db.exec("ALTER TABLE transactions ADD COLUMN amount_try REAL DEFAULT 0"); } catch(e) {}
 try { db.exec("ALTER TABLE transactions ADD COLUMN is_deleted INTEGER DEFAULT 0"); } catch(e) {}
-
-try { db.exec("ALTER TABLE cash_accounts ADD COLUMN credit_limit REAL DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE cash_accounts ADD COLUMN cutoff_day INTEGER"); } catch(e) {}
-try { db.exec("ALTER TABLE cash_accounts ADD COLUMN payment_due_day INTEGER"); } catch(e) {}
-try { db.exec("ALTER TABLE cash_accounts ADD COLUMN is_liability INTEGER DEFAULT 0"); } catch(e) {}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS expense_attachments (
@@ -399,6 +405,27 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
+
+// Idempotent migration for cash_accounts
+try {
+  const accountCols = db.prepare("PRAGMA table_info(cash_accounts)").all() as any[];
+  const cols = accountCols.map(c => c.name);
+  
+  if (!cols.includes('credit_limit')) db.exec("ALTER TABLE cash_accounts ADD COLUMN credit_limit REAL DEFAULT 0");
+  if (!cols.includes('cutoff_day')) db.exec("ALTER TABLE cash_accounts ADD COLUMN cutoff_day INTEGER");
+  if (!cols.includes('payment_due_day')) db.exec("ALTER TABLE cash_accounts ADD COLUMN payment_due_day INTEGER");
+  if (!cols.includes('is_liability')) db.exec("ALTER TABLE cash_accounts ADD COLUMN is_liability INTEGER DEFAULT 0");
+
+  // New features requested
+  if (!cols.includes('statement_day')) db.exec("ALTER TABLE cash_accounts ADD COLUMN statement_day INTEGER");
+  if (!cols.includes('due_day')) db.exec("ALTER TABLE cash_accounts ADD COLUMN due_day INTEGER");
+  if (!cols.includes('bank_name')) db.exec("ALTER TABLE cash_accounts ADD COLUMN bank_name TEXT");
+  if (!cols.includes('card_last_four')) db.exec("ALTER TABLE cash_accounts ADD COLUMN card_last_four TEXT");
+  if (!cols.includes('current_debt')) db.exec("ALTER TABLE cash_accounts ADD COLUMN current_debt REAL DEFAULT 0");
+  if (!cols.includes('available_limit')) db.exec("ALTER TABLE cash_accounts ADD COLUMN available_limit REAL DEFAULT 0");
+} catch (e) {
+  console.error("Migration error for cash_accounts:", e);
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS cash_transactions (
@@ -684,6 +711,80 @@ async function startServer() {
     }
   });
 
+  // Analytics Endpoint
+  app.get("/api/analytics", (req, res) => {
+    try {
+      const period = req.query.period || 'this_month';
+      const now = new Date();
+      let startDateStr = '';
+      let endDateStr = `${now.toISOString()}`;
+
+      if (period === 'today') {
+        const today = new Date(now.setHours(0,0,0,0));
+        startDateStr = today.toISOString();
+      } else if (period === 'this_week') {
+        const today = new Date();
+        const startOfWeek = new Date(today.setDate(today.getDate() - today.getDay() + 1));
+        startOfWeek.setHours(0,0,0,0);
+        startDateStr = startOfWeek.toISOString();
+      } else if (period === 'last_3_months') {
+        const start = new Date(now.setMonth(now.getMonth() - 2));
+        start.setDate(1);
+        start.setHours(0,0,0,0);
+        startDateStr = start.toISOString();
+      } else if (period === 'last_6_months') {
+        const start = new Date(now.setMonth(now.getMonth() - 5));
+        start.setDate(1);
+        start.setHours(0,0,0,0);
+        startDateStr = start.toISOString();
+      } else if (period === 'this_year') {
+        const start = new Date(now.getFullYear(), 0, 1);
+        startDateStr = start.toISOString();
+      } else {
+        // default this_month
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        startDateStr = start.toISOString();
+      }
+
+      // Base filtered sales
+      const sales = db.prepare(`SELECT * FROM sales WHERE created_at >= ? AND status NOT IN ('İptal Edildi', 'İade Edildi')`).all(startDateStr) as any[];
+      const saleIds = sales.map(s => s.id);
+      
+      let saleItems: any[] = [];
+      if (saleIds.length > 0) {
+         const placeholders = saleIds.map(() => '?').join(',');
+         saleItems = db.prepare(`
+           SELECT si.*, p.model, p.material, p.category, p.size, p.sku, s.platform
+           FROM sale_items si 
+           LEFT JOIN products p ON si.product_id = p.id
+           JOIN sales s ON si.sale_id = s.id
+           WHERE si.sale_id IN (${placeholders}) AND s.status NOT IN ('İptal Edildi', 'İade Edildi')
+         `).all(...saleIds) as any[];
+      }
+
+      // Get expenses
+      const expenses = db.prepare(`SELECT * FROM transactions WHERE type = 'Expense' AND date >= ?`).all(startDateStr) as any[];
+
+      // Aggregations
+      const metrics = {
+        totalRevenue: sales.reduce((ac, s) => ac + (s.net_total || 0), 0),
+        grossProfit: sales.reduce((ac, s) => ac + (s.gross_profit || 0), 0),
+        netProfit: sales.reduce((ac, s) => ac + (s.net_profit || 0), 0) - expenses.reduce((ac, ex) => ac + ex.amount, 0),
+        totalOrders: sales.length,
+        totalItemsSold: saleItems.reduce((ac, si) => ac + si.quantity, 0),
+        totalShipping: sales.reduce((ac, s) => ac + (s.shipping_cost || 0), 0),
+        totalCommission: sales.reduce((ac, s) => ac + ((s.total_amount || 0) * (s.commission_rate || 0) / 100), 0),
+        totalAds: sales.reduce((ac, s) => ac + (s.ad_spend || 0), 0),
+        totalPackaging: sales.reduce((ac, s) => ac + (s.packaging_cost || 0), 0),
+        generalExpenses: expenses.reduce((ac, ex) => ac + ex.amount, 0)
+      };
+
+      res.json({ success: true, metrics, sales, saleItems, expenses });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Dashboard Widgets Endpoints
   app.get("/api/dashboard/widgets", (req, res) => {
     try {
@@ -742,9 +843,9 @@ async function startServer() {
       const firstDayOfMonth = `${year}-${month}-01T00:00:00Z`;
       const currentMonthStr = `${year}-${month}`;
 
-      // Metrics
-      const revenueResult = db.prepare("SELECT SUM(total_amount) as total FROM sales WHERE created_at >= ?").get(firstDayOfMonth) as any;
-      const salesProfitResult = db.prepare("SELECT SUM(net_profit) as total FROM sales WHERE created_at >= ?").get(firstDayOfMonth) as any;
+      // Metrics (Exclude Cancelled Sales)
+      const revenueResult = db.prepare("SELECT SUM(net_total) as total FROM sales WHERE created_at >= ? AND status NOT IN ('İptal Edildi', 'İade Edildi')").get(firstDayOfMonth) as any;
+      const salesProfitResult = db.prepare("SELECT SUM(net_profit) as total, SUM(gross_profit) as gross FROM sales WHERE created_at >= ? AND status NOT IN ('İptal Edildi', 'İade Edildi')").get(firstDayOfMonth) as any;
       const realizedExpensesResult = db.prepare("SELECT SUM(amount) as total FROM transactions WHERE type = 'Expense' AND date >= ?").get(firstDayOfMonth) as any;
 
       // Cash Metrics
@@ -784,6 +885,7 @@ async function startServer() {
 
       const totalRevenue = revenueResult?.total || 0;
       const salesNetProfit = salesProfitResult?.total || 0;
+      const salesGrossProfit = salesProfitResult?.gross || 0;
       const totalExpenses = (realizedExpensesResult?.total || 0) + pendingRecurringTotal;
 
       const lowStockProductsQuery = db.prepare(`
@@ -791,13 +893,13 @@ async function startServer() {
           (SELECT path FROM product_images WHERE product_id = p.id ORDER BY sort_order ASC LIMIT 1) as cover_image,
           COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) as total_stock
         FROM products p
-        WHERE COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) < CAST((SELECT value FROM settings WHERE key = 'low_stock_threshold') AS INTEGER)
+        WHERE COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) <= COALESCE(p.min_stock_level, 0)
         AND p.status = 'Active'
         ORDER BY total_stock ASC
       `).all() as any[];
 
       const allProducts = db.prepare(`
-        SELECT p.id, p.purchase_cost, p.sale_price, p.purchase_price_usd, p.exchange_rate_used, p.buffer_percentage,
+        SELECT p.id, p.purchase_cost, p.sale_price, p.purchase_price_usd, p.exchange_rate_used, p.buffer_percentage, p.material, p.model, p.size, p.category,
           COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) as total_stock
         FROM products p
       `).all() as any[];
@@ -807,6 +909,7 @@ async function startServer() {
       let totalBufferedCostValue = 0;
 
       for (const p of allProducts) {
+        if (p.total_stock <= 0) continue;
         totalSaleValue += (p.total_stock * (p.sale_price || 0));
         const pc = p.purchase_cost || ((p.purchase_price_usd || 0) * (p.exchange_rate_used || 0));
         totalCostValue += (p.total_stock * pc);
@@ -816,11 +919,14 @@ async function startServer() {
       const metrics = {
         totalRevenue,
         totalExpenses,
+        grossProfit: salesGrossProfit,
         netProfit: salesNetProfit - totalExpenses,
+        netProfitMargin: totalRevenue > 0 ? ((salesNetProfit - totalExpenses) / totalRevenue) * 100 : 0,
         lowStockCount: lowStockProductsQuery.length,
         totalStockSalesValue: totalSaleValue,
         totalStockCostValue: totalCostValue,
         totalBufferedCostValue: totalBufferedCostValue,
+        stockEstProfit: totalSaleValue - totalCostValue,
         lowStockProducts: lowStockProductsQuery,
         cashTotal: cashAccountsTotal?.total || 0,
         pendingPlatform: pendingPlatformTotal?.total || 0,
@@ -834,8 +940,8 @@ async function startServer() {
         FROM transactions WHERE type = 'Expense' GROUP BY month
       `).all() as any[];
       const monthlySales = db.prepare(`
-        SELECT strftime('%Y-%m', created_at) as month, SUM(total_amount) as income, SUM(net_profit) as profit
-        FROM sales GROUP BY month
+        SELECT strftime('%Y-%m', created_at) as month, SUM(net_total) as income, SUM(net_profit) as profit
+        FROM sales WHERE status NOT IN ('İptal Edildi', 'İade Edildi') GROUP BY month
       `).all() as any[];
 
       const monthMap: Record<string, { income: number, expense: number, profit: number }> = {};
@@ -915,19 +1021,19 @@ async function startServer() {
     const { 
       name, title, warehouse_location, sku, barcode, category, model, description, 
       purchase_price_usd, purchase_cost, sale_price, buffer_percentage, profit_percentage, exchange_rate_used, price_locked,
-      weight, status, notes, platforms, images 
+      weight, status, notes, platforms, images, material, size, connection_type, usage_area, supplier, min_stock_level
     } = req.body;
     
     const insertProduct = db.prepare(`
-      INSERT INTO products (id, name, title, warehouse_location, sku, barcode, category, model, description, purchase_price_usd, purchase_cost, sale_price, buffer_percentage, profit_percentage, exchange_rate_used, price_locked, weight, status, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products (id, name, title, warehouse_location, sku, barcode, category, model, description, purchase_price_usd, purchase_cost, sale_price, buffer_percentage, profit_percentage, exchange_rate_used, price_locked, weight, status, notes, material, size, connection_type, usage_area, supplier, min_stock_level)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     db.transaction(() => {
       insertProduct.run(
         id, name, title, warehouse_location, sku || `SKU-${Date.now()}`, barcode, category, model, description, 
         purchase_price_usd || 0, purchase_cost || 0, sale_price || 0, buffer_percentage || 0, profit_percentage || 0, exchange_rate_used || 0, price_locked ? 1 : 0, 
-        weight || 0, status, notes
+        weight || 0, status, notes, material, size, connection_type, usage_area, supplier, min_stock_level || 0
       );
       
       const insertPlatform = db.prepare(`
@@ -989,7 +1095,7 @@ async function startServer() {
     const { 
       name, title, warehouse_location, sku, barcode, category, model, description, 
       purchase_price_usd, purchase_cost, sale_price, buffer_percentage, profit_percentage, exchange_rate_used, price_locked,
-      weight, status, notes, platforms, images 
+      weight, status, notes, platforms, images, material, size, connection_type, usage_area, supplier, min_stock_level 
     } = req.body;
     
     db.transaction(() => {
@@ -1003,12 +1109,12 @@ async function startServer() {
         UPDATE products SET 
           name=?, title=?, warehouse_location=?, sku=?, barcode=?, category=?, model=?, description=?, 
           purchase_price_usd=?, purchase_cost=?, sale_price=?, buffer_percentage=?, profit_percentage=?, exchange_rate_used=?, price_locked=?,
-          weight=?, status=?, notes=?, updated_at=CURRENT_TIMESTAMP
+          weight=?, status=?, notes=?, material=?, size=?, connection_type=?, usage_area=?, supplier=?, min_stock_level=?, updated_at=CURRENT_TIMESTAMP
         WHERE id=?
       `).run(
         name, title, warehouse_location, sku, barcode, category, model, description, 
         purchase_price_usd || 0, purchase_cost || 0, sale_price || 0, buffer_percentage || 0, profit_percentage || 0, exchange_rate_used || 0, price_locked ? 1 : 0,
-        weight || 0, status, notes, req.params.id
+        weight || 0, status, notes, material, size, connection_type, usage_area, supplier, min_stock_level || 0, req.params.id
       );
 
       db.prepare("DELETE FROM product_platforms WHERE product_id = ?").run(req.params.id);
@@ -1342,14 +1448,38 @@ async function startServer() {
   app.post("/api/cash-accounts", (req, res) => {
     try {
       const id = uuidv4();
-      const { name, currency, type, opening_balance, credit_limit, cutoff_day, payment_due_day, is_liability } = req.body;
+      const body = req.body;
+      const name = body.name || 'Yeni Hesap';
+      const currency = body.currency || 'TRY';
+      const type = body.type || 'bank';
+      const opening_balance = parseFloat(body.opening_balance || body.openingBalance || 0);
+      const credit_limit = parseFloat(body.credit_limit || body.creditLimit || 0);
+      const statement_day = parseInt(body.statement_day || body.statementDay || body.cutoff_day || 0);
+      const due_day = parseInt(body.due_day || body.dueDay || body.payment_due_day || body.due_date || 0);
+      const is_liability = parseInt(body.is_liability || body.isLiability || 0);
+      
+      const bank_name = body.bank_name || body.bankName || '';
+      const card_last_four = body.card_last_four || body.cardLastFour || '';
+      const current_debt = parseFloat(body.current_debt || body.currentDebt || 0);
+      const available_limit = parseFloat(body.available_limit || body.availableLimit || Math.max(0, credit_limit - current_debt));
+
       db.prepare(`
-        INSERT INTO cash_accounts (id, name, currency, type, opening_balance, credit_limit, cutoff_day, payment_due_day, is_liability)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, name, currency, type, opening_balance || 0, credit_limit || 0, cutoff_day, payment_due_day, is_liability || 0);
+        INSERT INTO cash_accounts (
+          id, name, currency, type, opening_balance, credit_limit, cutoff_day, payment_due_day, is_liability,
+          statement_day, due_day, bank_name, card_last_four, current_debt, available_limit
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id, name, currency, type, opening_balance, credit_limit, statement_day, due_day, is_liability,
+        statement_day, due_day, bank_name, card_last_four, current_debt, available_limit
+      );
       res.json({ success: true, id });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      if (err.message && err.message.includes('has no column')) {
+        res.status(500).json({ error: "Hesap oluşturulamadı. Veritabanı güncellemesi gerekli. Lütfen sayfayı yenileyin." });
+      } else {
+        res.status(500).json({ error: err.message });
+      }
     }
   });
 
@@ -1796,6 +1926,58 @@ async function startServer() {
   });
 
   // --- SALES ---
+  app.patch("/api/sales/:id/status", (req, res) => {
+    try {
+      const { status } = req.body;
+      db.transaction(() => {
+        const sale = db.prepare("SELECT * FROM sales WHERE id = ?").get(req.params.id) as any;
+        if (!sale) throw new Error("Satış bulunamadı.");
+
+        const oldStatus = sale.status;
+        if (oldStatus === status) return;
+
+        const isCancel = ['İptal Edildi', 'İade Edildi'].includes(status);
+        const wasCancel = ['İptal Edildi', 'İade Edildi'].includes(oldStatus);
+
+        if (!isCancel && wasCancel) {
+          throw new Error("İptal edilmiş bir satış geri alınamaz.");
+        }
+
+        db.prepare("UPDATE sales SET status = ? WHERE id = ?").run(status, req.params.id);
+
+        if (isCancel && !wasCancel) {
+          // Restore stock
+          const items = db.prepare("SELECT * FROM sale_items WHERE sale_id = ?").all(req.params.id) as any[];
+          for (const item of items) {
+            const plat = db.prepare("SELECT * FROM product_platforms WHERE product_id = ? AND platform_name = ?").get(item.product_id, sale.platform) as any;
+            if (plat) {
+              db.prepare("UPDATE product_platforms SET stock = stock + ? WHERE id = ?").run(item.quantity, plat.id);
+            } else {
+              const anyPlat = db.prepare("SELECT * FROM product_platforms WHERE product_id = ? LIMIT 1").get(item.product_id) as any;
+              if (anyPlat) {
+                db.prepare("UPDATE product_platforms SET stock = stock + ? WHERE id = ?").run(item.quantity, anyPlat.id);
+              }
+            }
+            db.prepare("INSERT INTO stock_movements (id, product_id, platform_name, change_amount, reason, type) VALUES (?, ?, ?, ?, ?, ?)")
+              .run(uuidv4(), item.product_id, sale.platform, item.quantity, `Satış iptali (No: ${sale.id})`, 'IN');
+          }
+
+          // Reverse cash transaction
+          const existingCash = db.prepare("SELECT * FROM cash_transactions WHERE source_type = 'sale' AND source_id = ? AND type = 'IN'").get(sale.id) as any;
+          if (existingCash) {
+             db.prepare(`
+               INSERT INTO cash_transactions (id, account_id, type, amount, currency, exchange_rate_at_transaction, source_type, source_id, description)
+               VALUES (?, ?, 'OUT', ?, ?, 1, 'sale_refund', ?, ?)
+             `).run(uuidv4(), existingCash.account_id, existingCash.amount, existingCash.currency, sale.id, `Satış İptali / İade: ${sale.customer_name}`);
+          }
+        }
+      })();
+      res.json({ success: true, message: "Durum güncellendi" });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   app.get("/api/sales", (req, res) => {
     try {
       const sales = db.prepare("SELECT * FROM sales ORDER BY created_at DESC").all();
@@ -1814,7 +1996,8 @@ async function startServer() {
       const { 
         customer_name, customer_phone, customer_address, 
         shipping_company, tracking_number, total_weight, total_quantity, total_amount, 
-        items, platform, commission_rate, shipping_cost, discount, cash_account_id 
+        items, platform, commission_rate, shipping_cost, discount, cash_account_id,
+        packaging_cost, ad_spend, other_expenses
       } = req.body;
       
       db.transaction(() => {
@@ -1837,8 +2020,13 @@ async function startServer() {
         const commRate = parseFloat(commission_rate) || 0;
         const discountAmt = parseFloat(discount) || 0;
         const shipCost = parseFloat(shipping_cost) || 0;
+        const packCost = parseFloat(packaging_cost) || 0;
+        const adCost = parseFloat(ad_spend) || 0;
+        const otherCost = parseFloat(other_expenses) || 0;
         
-        let netProfit = total_amount - discountAmt - shipCost - (total_amount * commRate / 100) - totalPurchaseCost;
+        let netTotal = total_amount - discountAmt;
+        let grossProfit = netTotal - totalPurchaseCost;
+        let netProfit = grossProfit - shipCost - packCost - adCost - otherCost - (total_amount * commRate / 100);
 
         // Cash Logic
         let finalCashAccountId = cash_account_id;
@@ -1865,9 +2053,9 @@ async function startServer() {
         const account = db.prepare("SELECT currency FROM cash_accounts WHERE id = ?").get(finalCashAccountId) as any;
         if (!account) throw new Error("Seçili kasa hesabı bulunamadı.");
 
-        let finalAmountToCash = total_amount - discountAmt;
+        let finalAmountToCash = netTotal;
         if (isPlatform) {
-           finalAmountToCash = total_amount - discountAmt - shipCost - (total_amount * commRate / 100);
+           finalAmountToCash = netTotal - shipCost - packCost - adCost - otherCost - (total_amount * commRate / 100);
         }
 
         db.prepare(`
@@ -1881,9 +2069,9 @@ async function startServer() {
 
         // 2. Create Sale
         db.prepare(`
-          INSERT INTO sales (id, customer_name, customer_phone, customer_address, shipping_company, tracking_number, total_weight, total_quantity, total_amount, platform, commission_rate, shipping_cost, discount, net_profit, cash_account_id, exchange_rate_at_transaction)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(id, customer_name, customer_phone, customer_address, shipping_company, tracking_number, total_weight, total_quantity, total_amount, plat, commRate, shipCost, discountAmt, netProfit, finalCashAccountId, activeRate);
+          INSERT INTO sales (id, customer_name, customer_phone, customer_address, shipping_company, tracking_number, total_weight, total_quantity, total_amount, platform, commission_rate, shipping_cost, discount, packaging_cost, ad_spend, other_expenses, net_total, gross_profit, net_profit, cash_account_id, exchange_rate_at_transaction)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, customer_name, customer_phone, customer_address, shipping_company, tracking_number, total_weight, total_quantity, total_amount, plat, commRate, shipCost, discountAmt, packCost, adCost, otherCost, netTotal, grossProfit, netProfit, finalCashAccountId, activeRate);
 
         const insertItem = db.prepare(`
           INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, weight, unit_price, purchase_cost, net_profit)
@@ -2477,6 +2665,104 @@ async function startServer() {
       });
     } catch (err: any) {
       res.status(500).json({ error: "Backup failed: " + err.message });
+    }
+  });
+
+  app.post("/api/maintenance/fix-pricing", (req, res) => {
+    try {
+      db.transaction(() => {
+        // 1. Fill purchase_price_usd from purchase_cost if purchase_price_usd is 0 and purchase_cost > 0
+        // Use a default exchange rate if activeRate is not available, but let's assume we read settings
+        const settings = db.prepare("SELECT * FROM settings").get() as any;
+        const defaultRate = settings.usd_exchange_rate || 35; // fallback
+        const defaultBuffer = settings.default_buffer_percentage || 20;
+        const defaultProfit = settings.default_profit_percentage || 50;
+
+        // Fetch products that need fixing
+        const productsParams = db.prepare(`
+           SELECT id, purchase_price_usd, purchase_cost, sale_price, buffer_percentage, profit_percentage, exchange_rate_used, price_locked 
+           FROM products
+        `).all() as any[];
+
+        const updateStmt = db.prepare(`
+           UPDATE products 
+           SET purchase_price_usd=?, purchase_cost=?, sale_price=?, buffer_percentage=?, profit_percentage=?, exchange_rate_used=?, price_locked=?, updated_at=CURRENT_TIMESTAMP
+           WHERE id=?
+        `);
+
+        for (const p of productsParams) {
+           let { purchase_price_usd, purchase_cost, sale_price, buffer_percentage, profit_percentage, exchange_rate_used, price_locked } = p;
+           
+           purchase_price_usd = purchase_price_usd || 0;
+           purchase_cost = purchase_cost || 0;
+           sale_price = sale_price || 0;
+           buffer_percentage = buffer_percentage || defaultBuffer;
+           profit_percentage = profit_percentage || defaultProfit;
+           exchange_rate_used = exchange_rate_used || defaultRate;
+
+           let needsUpdate = false;
+
+           // If USD is zero, but cost is not
+           if (purchase_price_usd === 0 && purchase_cost > 0) {
+              purchase_price_usd = purchase_cost / exchange_rate_used;
+              needsUpdate = true;
+           }
+
+           // If USD is zero, and Cost is zero, but Sale price is not
+           if (purchase_price_usd === 0 && purchase_cost === 0 && sale_price > 0) {
+              // Backward calculation
+              // sale_price = bufferedCost * (1+profit/100)
+              // bufferedCost = cost * (1+buffer/100)
+              const bufferedCost = sale_price / (1 + (profit_percentage/100));
+              purchase_cost = bufferedCost / (1 + (buffer_percentage/100));
+              purchase_price_usd = purchase_cost / exchange_rate_used;
+              needsUpdate = true;
+           }
+           
+           if (!p.buffer_percentage || !p.profit_percentage || !p.exchange_rate_used) {
+              needsUpdate = true;
+           }
+
+           if (needsUpdate) {
+              updateStmt.run(purchase_price_usd, purchase_cost, sale_price, buffer_percentage, profit_percentage, exchange_rate_used, price_locked, p.id);
+           }
+        }
+
+        // Fix missing cost data in sales and sale_items
+        const salesObj = db.prepare("SELECT * FROM sales").all() as any[];
+        const updateSaleItem = db.prepare("UPDATE sale_items SET purchase_cost=?, net_profit=? WHERE id=?");
+        const updateSale = db.prepare("UPDATE sales SET net_total=?, gross_profit=?, net_profit=?, packaging_cost=?, ad_spend=?, other_expenses=? WHERE id=?");
+
+        for (const s of salesObj) {
+           const items = db.prepare("SELECT * FROM sale_items WHERE sale_id=?").all(s.id) as any[];
+           let totalPurchaseCost = 0;
+           for (const item of items) {
+              let itemCost = item.purchase_cost;
+              if (!itemCost || itemCost <= 0) {
+                 const prod = db.prepare("SELECT purchase_cost FROM products WHERE id=?").get(item.product_id) as any;
+                 itemCost = prod?.purchase_cost || 0;
+              }
+              const itemTotalRevenue = item.unit_price * item.quantity;
+              const itemTotalCost = itemCost * item.quantity;
+              const comm = itemTotalRevenue * (s.commission_rate || 0) / 100;
+              const itemProfit = itemTotalRevenue - itemTotalCost - comm;
+              updateSaleItem.run(itemCost, itemProfit, item.id);
+              totalPurchaseCost += itemTotalCost;
+           }
+
+           const val = (n: any) => parseFloat(n) || 0;
+           const netTotal = val(s.total_amount) - val(s.discount);
+           const grossProfit = netTotal - totalPurchaseCost;
+           const netProfit = grossProfit - val(s.shipping_cost) - val(s.packaging_cost) - val(s.ad_spend) - val(s.other_expenses) - (val(s.total_amount) * val(s.commission_rate) / 100);
+
+           updateSale.run(netTotal, grossProfit, netProfit, val(s.packaging_cost), val(s.ad_spend), val(s.other_expenses), s.id);
+        }
+
+      })();
+
+      res.json({ success: true, message: "Fiyat verileri ve geçmiş satışlar onarıldı." });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

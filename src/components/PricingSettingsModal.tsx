@@ -32,26 +32,46 @@ export default function PricingSettingsModal({
 
   // Initial calculation logic
   const calculatePricing = (product: any) => {
-    const purchaseUSD = parseFloat(product.purchase_price_usd) || 0;
+    let purchaseUSD = parseFloat(product.purchase_price_usd);
+    let purchaseTRY = 0;
     const rate = exchangeRate || 0;
+
+    if (!isNaN(purchaseUSD) && purchaseUSD > 0) {
+       purchaseTRY = purchaseUSD * rate;
+    } else if (parseFloat(product.purchase_cost) > 0) {
+       purchaseTRY = parseFloat(product.purchase_cost);
+    }
+
+    if (purchaseTRY === 0 && parseFloat(product.sale_price) > 0) {
+       return parseFloat(product.sale_price); // Fallback to existing logic if cost is unknown
+    }
+
     const buffer = bufferPercentage || 0;
     const profit = profitPercentage || 0;
-    const purchaseTRY = purchaseUSD * rate;
     const bufferedCostTRY = purchaseTRY * (1 + buffer / 100);
     const calculatedSalePriceTRY = bufferedCostTRY * (1 + profit / 100);
     return Math.ceil(calculatedSalePriceTRY);
   };
 
   const handlePreview = () => {
+    let hasFailures = false;
     const data = products.map(p => {
       if (p.price_locked && !includeLocked) {
         return { ...p, newSalePrice: p.sale_price, willUpdate: false };
       }
-      return { ...p, newSalePrice: calculatePricing(p), willUpdate: true };
+      const newPrice = calculatePricing(p);
+      if (newPrice === 0 && (!p.price_locked)) {
+         hasFailures = true;
+      }
+      return { ...p, newSalePrice: newPrice, willUpdate: true };
     });
     setPreviewData(data);
     setShowPreview(true);
-    setErrorMessage("");
+    if (hasFailures) {
+       setErrorMessage("Bazı ürünlerin alış fiyatı bilinmediği veya 0 olduğu için fiyat hesaplanamadı. Eksik verili ürünleri Bakım menüsünden onarabilirsiniz.");
+    } else {
+       setErrorMessage("");
+    }
   };
 
   const executeUpdate = (onlyMissing: boolean = false) => {

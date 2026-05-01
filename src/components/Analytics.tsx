@@ -42,40 +42,57 @@ const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'
 
 type TabView = 'financial' | 'products' | 'platform' | 'cashflow' | 'risk';
 
-export default function Analytics({ settings }: { settings: Settings | null }) {
+export default function Analytics({ settings, initialTab }: { settings: Settings | null, initialTab?: string }) {
   const { FormatAmount, activeRate } = useCurrency();
-  const [activeTab, setActiveTab] = useState<TabView>('financial');
+  const [activeTab, setActiveTab] = useState<string>(initialTab || 'financial');
+  const [period, setPeriod] = useState<string>('this_month');
   
   const [sales, setSales] = useState<any[]>([]);
+  const [saleItems, setSaleItems] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [cashTxs, setCashTxs] = useState<any[]>([]);
   const [cashAccounts, setCashAccounts] = useState<any[]>([]);
+  const [metrics, setMetrics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
+  // Load static data
   useEffect(() => {
-    const loadAll = async () => {
+    const loadStatic = async () => {
       try {
-        const [salesData, txData, prodData, cxData, caData] = await Promise.all([
-          api.get('/sales'),
-          api.get('/transactions'),
+        const [prodData, cxData, caData] = await Promise.all([
           api.get('/products'),
           api.get('/cash-transactions'),
           api.get('/cash-accounts')
         ]);
-        setSales(salesData);
-        setTransactions(txData);
         setProducts(prodData);
         setCashTxs(cxData);
         setCashAccounts(caData);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    loadStatic();
+  }, []);
+
+  // Load analytics data
+  useEffect(() => {
+    const loadAnalytics = async () => {
+      setLoading(true);
+      try {
+        const data = await api.get(`/analytics?period=${period}`);
+        setSales(data.sales || []);
+        setSaleItems(data.saleItems || []);
+        setTransactions(data.expenses || []);
+        setMetrics(data.metrics || null);
       } catch (err) {
         console.error(err);
       } finally {
         setLoading(false);
       }
     };
-    loadAll();
-  }, []);
+    loadAnalytics();
+  }, [period]);
 
   // --- FINANSAL ANALIZ (Financial Analysis) ---
   const financialMonthly = useMemo(() => {
@@ -102,26 +119,16 @@ export default function Analytics({ settings }: { settings: Settings | null }) {
   }, [sales, transactions]);
 
   // --- ÜRÜN ANALİZİ (Product Analysis) ---
-  const productStats = useMemo(() => {
-     // Join products with sales performance
-     return products.map(p => {
-        let soldQty = 0;
-        let revenue = 0;
-        let profit = 0;
-        
-        // This is a rough estimation since we don't fetch sale_items. 
-        // We can just count total transactions from transactions table if products are linked.
-        const productTxs = transactions.filter(t => t.product_id === p.id);
-        const pRevenue = productTxs.filter(t => t.type === 'Income').reduce((sum, t) => sum + t.amount, 0);
-        const soldCount = productTxs.filter(t => t.type === 'Income').length; // approximation
-        
-        let estComm = 0;
-        productTxs.filter(t => t.type === 'Income').forEach(t => {
-          const rate = settings?.commission_rates[t.platform] || 0;
-          estComm += (t.amount * rate) / 100;
-        });
+  const missingCostCount = useMemo(() => {
+     return saleItems.filter((si: any) => !si.purchase_cost || si.purchase_cost <= 0).length;
+  }, [saleItems]);
 
-        const pProfit = pRevenue - (soldCount * p.purchase_cost) - estComm;
+  const productStats = useMemo(() => {
+     return products.map(p => {
+        const pItems = saleItems.filter((si: any) => si.product_id === p.id);
+        const soldCount = pItems.reduce((sum: number, si: any) => sum + si.quantity, 0);
+        const pRevenue = pItems.reduce((sum: number, si: any) => sum + (si.unit_price * si.quantity), 0);
+        const pProfit = pItems.reduce((sum: number, si: any) => sum + (si.net_profit || 0), 0);
         
         return {
            ...p,
@@ -131,7 +138,31 @@ export default function Analytics({ settings }: { settings: Settings | null }) {
            margin: pRevenue > 0 ? (pProfit / pRevenue) * 100 : 0
         };
      }).sort((a, b) => b.revenue - a.revenue);
-  }, [products, transactions, settings]);
+  }, [products, saleItems]);
+
+  const modelStats = useMemo(() => {
+     const groups: Record<string, { model: string, revenue: number, profit: number, soldQty: number }> = {};
+     productStats.forEach(p => {
+        if (!p.model) return;
+        if (!groups[p.model]) groups[p.model] = { model: p.model, revenue: 0, profit: 0, soldQty: 0 };
+        groups[p.model].revenue += p.revenue;
+        groups[p.model].profit += p.profit;
+        groups[p.model].soldQty += p.soldQty;
+     });
+     return Object.values(groups).map(g => ({ ...g, margin: g.revenue > 0 ? (g.profit / g.revenue) * 100 : 0 })).sort((a, b) => b.revenue - a.revenue);
+  }, [productStats]);
+
+  const materialStats = useMemo(() => {
+     const groups: Record<string, { material: string, revenue: number, profit: number, soldQty: number }> = {};
+     productStats.forEach(p => {
+        const mat = p.material || 'Belirtilmedi';
+        if (!groups[mat]) groups[mat] = { material: mat, revenue: 0, profit: 0, soldQty: 0 };
+        groups[mat].revenue += p.revenue;
+        groups[mat].profit += p.profit;
+        groups[mat].soldQty += p.soldQty;
+     });
+     return Object.values(groups).map(g => ({ ...g, margin: g.revenue > 0 ? (g.profit / g.revenue) * 100 : 0 })).sort((a, b) => b.revenue - a.revenue);
+  }, [productStats]);
 
   // --- RİSK ANALİZİ (Risk Analysis) ---
   const riskStats = useMemo(() => {
@@ -140,11 +171,11 @@ export default function Analytics({ settings }: { settings: Settings | null }) {
      const now = new Date().getTime();
 
      return productStats.map(p => {
-        const productTxs = transactions.filter(t => t.product_id === p.id && t.type === 'Income');
-        const lastSale = productTxs.length > 0 ? new Date(Math.max(...productTxs.map(t => new Date(t.date).getTime()))) : null;
+        const pSales = sales.filter(s => saleItems.some(si => si.sale_id === s.id && si.product_id === p.id));
+        const lastSale = pSales.length > 0 ? new Date(Math.max(...pSales.map(t => new Date(t.created_at).getTime()))) : null;
         const totalStock = (p.platforms ? p.platforms.reduce((sum, s) => sum + (s.stock || 0), 0) : 0);
         
-        const isCritical = totalStock < threshold && p.status === 'Active';
+        const isCritical = totalStock <= (p.min_stock_level || threshold) && p.status === 'Active';
         const isDead = p.status === 'Active' && totalStock > 0 && (!lastSale || (now - lastSale.getTime() > deadThresholdMillis));
         const isLosingMoney = p.soldQty > 0 && p.margin < 0;
         
@@ -157,7 +188,7 @@ export default function Analytics({ settings }: { settings: Settings | null }) {
            isLosingMoney
         };
      });
-  }, [productStats, transactions, settings]);
+  }, [productStats, sales, saleItems, settings]);
 
   // --- NAKİT AKIŞI ANALİZİ (Cashflow Analysis) ---
   const cashFlowMonthly = useMemo(() => {
@@ -221,19 +252,53 @@ export default function Analytics({ settings }: { settings: Settings | null }) {
            <h1 className="text-2xl font-black text-gray-900 tracking-tight">Akıllı Analizler</h1>
            <p className="text-sm font-medium text-gray-500 mt-1">Verilerinizi kazanca dönüştüren derinlemesine içgörüler</p>
         </div>
+        <div className="flex items-center gap-3">
+           <div className="relative">
+              <select 
+                 value={period}
+                 onChange={(e) => setPeriod(e.target.value)}
+                 className="appearance-none bg-white border border-gray-300 text-gray-700 font-bold text-sm rounded-xl pl-4 pr-10 py-2.5 outline-none focus:ring-2 focus:ring-blue-500 hover:bg-gray-50 transition-colors shadow-sm"
+              >
+                 <option value="today">Bugün</option>
+                 <option value="this_week">Bu Hafta</option>
+                 <option value="this_month">Bu Ay</option>
+                 <option value="last_3_months">Son 3 Ay</option>
+                 <option value="last_6_months">Son 6 Ay</option>
+                 <option value="this_year">Bu Yıl</option>
+                 <option value="all_time">Tüm Zamanlar</option>
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-500">
+                 <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+              </div>
+           </div>
+        </div>
       </div>
+
+      {missingCostCount > 0 && (
+         <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl flex items-start gap-4">
+            <div className="bg-orange-100 p-2 rounded-lg">
+               <AlertTriangle className="w-5 h-5 text-orange-600" />
+            </div>
+            <div>
+               <h3 className="font-bold text-orange-900">Maliyeti Girilmemiş Satışlar Var</h3>
+               <p className="text-sm text-orange-800 mt-1">Seçili dönemde maliyet bilgisi olmayan <span className="font-black">{missingCostCount}</span> adet satış kalemi tespit edildi. Bu durum kârlılık analizlerinizi yanıltabilir. Ayarlar'dan "Bakım ve Onarım &gt;&gt; Fiyatları Geçmişe Uygula" aracını kullanabilirsiniz.</p>
+            </div>
+         </div>
+      )}
 
       <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
          {[
            { id: 'financial', label: 'Finansal Analiz', icon: TrendingUp },
            { id: 'products', label: 'Ürün Analizi', icon: Package },
+           { id: 'models', label: 'Model Analizi', icon: Layers },
+           { id: 'materials', label: 'Materyal Analizi', icon: Layers },
            { id: 'platform', label: 'Platform Analizi', icon: Layers },
            { id: 'cashflow', label: 'Nakit Akışı', icon: Banknote },
            { id: 'risk', label: 'Risk Analizi', icon: AlertTriangle }
          ].map(tab => (
            <button
              key={tab.id}
-             onClick={() => setActiveTab(tab.id as TabView)}
+             onClick={() => setActiveTab(tab.id)}
              className={cn(
                "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap",
                activeTab === tab.id 
@@ -347,6 +412,84 @@ export default function Analytics({ settings }: { settings: Settings | null }) {
                         <td className="py-4 text-right text-sm font-semibold">
                           <span className={cn("px-2 py-0.5 rounded-full text-xs", p.margin >= 20 ? "bg-green-100 text-green-800" : p.margin > 0 ? "bg-yellow-100 text-yellow-800" : "bg-red-100 text-red-800")}>
                             %{p.margin.toFixed(1)}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+               </table>
+             </div>
+           </div>
+        </div>
+      )}
+
+      {activeTab === 'models' && (
+        <div className="space-y-6 animate-in slide-in-from-bottom-2">
+           <div className="card p-6 overflow-hidden">
+             <div className="flex justify-between items-center mb-6">
+                <h3 className="font-bold text-lg text-gray-900">Model Performans Sıralaması</h3>
+                <span className="text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">{modelStats.length} Model Listelendi</span>
+             </div>
+             <div className="overflow-x-auto">
+               <table className="w-full text-left border-collapse whitespace-nowrap min-w-[800px]">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      <th className="py-4 font-bold text-sm text-gray-500">Model Adı</th>
+                      <th className="py-4 font-bold text-sm text-gray-500 text-right">Tahmini Satış</th>
+                      <th className="py-4 font-bold text-sm text-gray-500 text-right">Tahmini Ciro</th>
+                      <th className="py-4 font-bold text-sm text-gray-500 text-right">T. Net Kar</th>
+                      <th className="py-4 font-bold text-sm text-gray-500 text-right">Marj</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {modelStats.map(m => (
+                      <tr key={m.model} className="hover:bg-gray-50 transition-colors group">
+                        <td className="py-4 font-bold text-gray-900">{m.model}</td>
+                        <td className="py-4 text-right text-sm">{m.soldQty} Adet</td>
+                        <td className="py-4 text-right text-sm font-semibold text-gray-900"><FormatAmount align="right" amount={m.revenue} /></td>
+                        <td className="py-4 text-right text-sm font-bold text-green-600"><FormatAmount align="right" amount={m.profit} /></td>
+                        <td className="py-4 text-right text-sm font-semibold">
+                          <span className={cn("px-2 py-0.5 rounded-full text-xs", m.margin >= 20 ? "bg-green-100 text-green-800" : m.margin > 0 ? "bg-yellow-100 text-yellow-800" : "bg-red-100 text-red-800")}>
+                            %{m.margin.toFixed(1)}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+               </table>
+             </div>
+           </div>
+        </div>
+      )}
+
+      {activeTab === 'materials' && (
+        <div className="space-y-6 animate-in slide-in-from-bottom-2">
+           <div className="card p-6 overflow-hidden">
+             <div className="flex justify-between items-center mb-6">
+                <h3 className="font-bold text-lg text-gray-900">Materyal Performans Sıralaması</h3>
+                <span className="text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">{materialStats.length} Materyal Listelendi</span>
+             </div>
+             <div className="overflow-x-auto">
+               <table className="w-full text-left border-collapse whitespace-nowrap min-w-[800px]">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      <th className="py-4 font-bold text-sm text-gray-500">Materyal Türü</th>
+                      <th className="py-4 font-bold text-sm text-gray-500 text-right">Tahmini Satış</th>
+                      <th className="py-4 font-bold text-sm text-gray-500 text-right">Tahmini Ciro</th>
+                      <th className="py-4 font-bold text-sm text-gray-500 text-right">T. Net Kar</th>
+                      <th className="py-4 font-bold text-sm text-gray-500 text-right">Marj</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {materialStats.map(m => (
+                      <tr key={m.material} className="hover:bg-gray-50 transition-colors group">
+                        <td className="py-4 font-bold text-gray-900">{m.material}</td>
+                        <td className="py-4 text-right text-sm">{m.soldQty} Adet</td>
+                        <td className="py-4 text-right text-sm font-semibold text-gray-900"><FormatAmount align="right" amount={m.revenue} /></td>
+                        <td className="py-4 text-right text-sm font-bold text-green-600"><FormatAmount align="right" amount={m.profit} /></td>
+                        <td className="py-4 text-right text-sm font-semibold">
+                          <span className={cn("px-2 py-0.5 rounded-full text-xs", m.margin >= 20 ? "bg-green-100 text-green-800" : m.margin > 0 ? "bg-yellow-100 text-yellow-800" : "bg-red-100 text-red-800")}>
+                            %{m.margin.toFixed(1)}
                           </span>
                         </td>
                       </tr>

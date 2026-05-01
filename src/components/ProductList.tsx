@@ -163,7 +163,21 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
         const name = row[mapping.name] || 'İsimsiz Ürün';
         const category = row[mapping.category] || 'Genel';
         const totalStock = parseInt(row[mapping.stock]) || 0;
-        const purchasePriceUSD = parseFloat(row[mapping.price]) || 0;
+        const parseCSVPrice = (val: any) => {
+          if (!val) return 0;
+          let s = String(val).replace(/[^0-9.,-]/g, ''); // remove currencies, spaces
+          s = s.replace(',', '.'); // handle comma decimals
+          // However, if there are multiple dots (like 1.000.45) we need better parsing, but basic comma-to-dot works for most cases
+          const lastDot = s.lastIndexOf('.');
+          if (lastDot !== -1) {
+             const before = s.slice(0, lastDot).replace(/\./g, '');
+             const after = s.slice(lastDot + 1);
+             s = before + '.' + after;
+          }
+          const num = parseFloat(s);
+          return isNaN(num) ? 0 : num;
+        };
+        const purchasePriceUSD = parseCSVPrice(row[mapping.price]);
         const barcode = row[mapping.barcode] || '';
         const description = row[mapping.description] || '';
         const weight = parseInt(row[mapping.weight]) || 0;

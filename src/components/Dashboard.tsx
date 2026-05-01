@@ -44,9 +44,10 @@ function cn(...inputs: ClassValue[]) {
 interface DashboardProps {
   onNavigate: (view: any) => void;
   onProductClick: (id: string) => void;
+  onNavigateAnalytics?: (tab: string) => void;
 }
 
-export default function Dashboard({ onNavigate }: DashboardProps) {
+export default function Dashboard({ onNavigate, onProductClick, onNavigateAnalytics }: DashboardProps) {
   const { FormatAmount } = useCurrency();
   const [data, setData] = useState<any>(null);
   const [widgets, setWidgets] = useState<any[]>([]);
@@ -372,6 +373,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                           m={m} 
                           FormatAmount={FormatAmount} 
                           onNavigate={onNavigate}
+                          onNavigateAnalytics={onNavigateAnalytics}
+                          onProductClick={onProductClick}
                           getGrossProfitEstimate={getGrossProfitEstimate}
                           getAvgMarginEstimate={getAvgMarginEstimate}
                         />
@@ -391,7 +394,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
               cols={{ lg: 12, md: 12, sm: 6, xs: 1, xxs: 1 }}
                 rowHeight={60}
                 onLayoutChange={(layout) => saveLayout(layout)}
+                // @ts-ignore
                 isDraggable={editMode}
+                // @ts-ignore
                 isResizable={editMode}
                 margin={[24, 24]}
               >
@@ -408,6 +413,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                       m={m} 
                       FormatAmount={FormatAmount} 
                       onNavigate={onNavigate}
+                      onNavigateAnalytics={onNavigateAnalytics}
+                      onProductClick={onProductClick}
                       getGrossProfitEstimate={getGrossProfitEstimate}
                       getAvgMarginEstimate={getAvgMarginEstimate}
                     />
