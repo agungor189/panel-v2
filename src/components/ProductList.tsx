@@ -23,7 +23,6 @@ import { twMerge } from 'tailwind-merge';
 import BarcodeScannerModal from './BarcodeScannerModal';
 import PricingSettingsModal from './PricingSettingsModal';
 import { Calculator, Loader2, CheckCircle, AlertTriangle } from 'lucide-react';
-import { AdvancedImportProgress } from './AdvancedImportProgress';
 import toast from 'react-hot-toast';
 
 function cn(...inputs: ClassValue[]) {

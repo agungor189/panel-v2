@@ -1280,7 +1280,7 @@ async function startServer() {
           VALUES (?, ?, 'Expense', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           txId, date || new Date().toISOString(), category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number, cash_account_id, activeRate,
-          currency || 'TRY', amount_try || amount * activeRate, payer_person_id, will_be_refunded || 0, refund_status, is_invoice || 0, invoice_name, is_stock_related || 0, distribute_to_product_cost || 0
+          currency || 'TRY', amount_try || (currency === 'USD' ? amount * activeRate : amount), payer_person_id, will_be_refunded || 0, refund_status, is_invoice || 0, invoice_name, is_stock_related || 0, distribute_to_product_cost || 0
         );
         
         logActivity('CREATE', 'expense', txId, { after: req.body });
@@ -1307,7 +1307,7 @@ async function startServer() {
       WHERE id = ? AND type = 'Expense'
     `).run(
       date || new Date().toISOString(), category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number,
-      currency || 'TRY', amount_try || amount, payer_person_id, will_be_refunded || 0, refund_status, is_invoice || 0, invoice_name, is_stock_related || 0, distribute_to_product_cost || 0, cash_account_id,
+      currency || 'TRY', amount_try || (currency === 'USD' ? amount * (exchange_rate || beforeState.exchange_rate_at_transaction || 1) : amount), payer_person_id, will_be_refunded || 0, refund_status, is_invoice || 0, invoice_name, is_stock_related || 0, distribute_to_product_cost || 0, cash_account_id,
       req.params.id
     );
     
@@ -1360,7 +1360,7 @@ async function startServer() {
   app.get("/api/finance-summary", (req, res) => {
     try {
       // 1. Toplam Sermaye Girişi
-      const capitalRes = db.prepare("SELECT SUM(amount * exchange_rate_at_transaction) as total FROM cash_transactions WHERE source_type = 'capital_injection'").get() as any;
+      const capitalRes = db.prepare("SELECT SUM(amount * (CASE WHEN currency='USD' THEN exchange_rate_at_transaction ELSE 1 END)) as total FROM cash_transactions WHERE source_type = 'capital_injection'").get() as any;
       const capitalInjection = capitalRes?.total || 0;
 
       // 2. Satış Geliri
@@ -1391,7 +1391,10 @@ async function startServer() {
 
       const accountsRes = db.prepare(`
         SELECT ca.id, ca.type, ca.is_liability, ca.opening_balance,
-               (SELECT SUM(CASE WHEN type='IN' THEN amount * exchange_rate_at_transaction ELSE -amount*exchange_rate_at_transaction END) FROM cash_transactions WHERE account_id = ca.id) as net_flow
+               (SELECT SUM(CASE 
+                  WHEN type='IN' THEN amount * (CASE WHEN currency='USD' THEN exchange_rate_at_transaction ELSE 1 END) 
+                  ELSE -amount * (CASE WHEN currency='USD' THEN exchange_rate_at_transaction ELSE 1 END) 
+               END) FROM cash_transactions WHERE account_id = ca.id) as net_flow
         FROM cash_accounts ca
         WHERE ca.is_active = 1
       `).all() as any[];
@@ -1620,7 +1623,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             txId, date || new Date().toISOString(), type, category, platform, amount, product_id, note, reference_number, supplier, invoice_number, expense_type, cash_account_id, activeRate,
-            currency || 'TRY', amount_try || amount * activeRate, payer_person_id, will_be_refunded || 0, refund_status, is_invoice || 0, invoice_name, is_stock_related || 0, distribute_to_product_cost || 0, document_url
+            currency || 'TRY', amount_try || (currency === 'USD' ? amount * activeRate : amount), payer_person_id, will_be_refunded || 0, refund_status, is_invoice || 0, invoice_name, is_stock_related || 0, distribute_to_product_cost || 0, document_url
           );
 
           if (type === 'Expense') {

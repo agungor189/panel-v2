@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Outer Hexagon -->
+  <polygon points="27.5,15 72.5,15 95,50 72.5,85 27.5,85 5,50" fill="none" stroke="#00e5ba" stroke-width="12" stroke-linejoin="round" />
+  
+  <!-- Inner Circle point -->
+  <circle cx="50" cy="50" r="8" fill="#00e5ba" />
+</svg>

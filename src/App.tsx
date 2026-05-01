@@ -186,12 +186,15 @@ export default function App() {
         "md:translate-x-0",
         isMobileMenuOpen ? "translate-x-0 w-64" : "-translate-x-full md:translate-x-0"
       )}>
-        <div className="flex h-16 items-center px-6 border-b border-white/10 shrink-0">
+        <div className="flex h-16 items-center px-4 border-b border-white/10 shrink-0">
           {(isSidebarOpen || isMobileMenuOpen) ? (
             <div className="flex items-center justify-between w-full">
-              <h1 className="text-xl font-extrabold tracking-wider text-[#38bdf8] truncate">
-                {settings?.company_name || 'DSDST Panel'}
-              </h1>
+              <div className="flex items-center gap-3 overflow-hidden">
+                <img src="/logo.svg" alt="DSDST Logo" className="w-8 h-8 shrink-0" />
+                <h1 className="text-xl font-extrabold tracking-wider text-white truncate">
+                  {settings?.company_name || 'DSDST Panel'}
+                </h1>
+              </div>
               <button 
                 onClick={() => setIsMobileMenuOpen(false)}
                 className="md:hidden p-1 text-white/50 hover:text-white"
@@ -200,7 +203,9 @@ export default function App() {
               </button>
             </div>
           ) : (
-            <div className="w-8 h-8 rounded bg-primary flex items-center justify-center text-white text-xs font-bold">DP</div>
+             <div className="w-full flex justify-center">
+               <img src="/logo.svg" alt="DSDST" className="w-8 h-8" />
+             </div>
           )}
         </div>
 

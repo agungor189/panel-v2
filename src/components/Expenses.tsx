@@ -112,7 +112,7 @@ export default function Expenses({ settings }: { settings?: Settings | null }) {
                     )}
                   </td>
                   <td className="px-6 py-4 font-black text-right whitespace-nowrap text-red-600">
-                    <FormatAmount align="right" amount={expense.amount || 0} exchangeRateAtTransaction={expense.exchange_rate_at_transaction} />
+                    <FormatAmount align="right" amount={expense.amount || 0} originalCurrency={(expense as any).currency || 'TRY'} exchangeRateAtTransaction={expense.exchange_rate_at_transaction} />
                   </td>
                   <td className="px-6 py-4 text-right">
                     <button className="text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity p-2 hover:bg-blue-50 rounded-lg">
@@ -591,7 +591,7 @@ function ExpenseDetailModal({ expense: currentExpense, onClose, onRefresh, setti
                         <div className="bg-gray-50 p-6 rounded-xl border border-gray-100 flex items-center justify-between">
                            <div>
                              <p className="text-gray-500 text-sm font-medium mb-1">Toplam Tutar</p>
-                             <div className="text-3xl font-black text-gray-900 tracking-tight"><FormatAmount amount={expense.amount || 0} exchangeRateAtTransaction={expense.exchange_rate_at_transaction} /></div>
+                             <div className="text-3xl font-black text-gray-900 tracking-tight"><FormatAmount amount={expense.amount || 0} originalCurrency={(expense as any).currency || 'TRY'} exchangeRateAtTransaction={expense.exchange_rate_at_transaction} /></div>
                            </div>
                            <button onClick={() => setIsEditing(true)} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg shadow-sm hover:bg-gray-50 transition-colors">
                              Düzenle
