@@ -34,7 +34,7 @@ import RecurringPayments from './components/RecurringPayments';
 import SettingsView from './components/SettingsView';
 import ActivityLogs from './components/ActivityLogs';
 import LoginPage from './components/LoginPage';
-import CashManagement from './components/CashManagement';
+import FinanceModule from './components/FinanceModule';
 import { api } from './lib/api';
 import { Settings } from './types';
 import { clsx, type ClassValue } from 'clsx';
@@ -157,7 +157,7 @@ export default function App() {
     { id: 'products', label: 'Ürünler', icon: Package },
     { id: 'sales', label: 'Satışlar', icon: ShoppingCart },
     { id: 'b2b', label: 'B2B', icon: Briefcase },
-    { id: 'cash', label: 'Kasa / Nakit Akışı', icon: Landmark },
+    { id: 'cash', label: 'Finans Merkezi', icon: Landmark },
     { id: 'income', label: 'Gelirler', icon: TrendingUp },
     { id: 'expense', label: 'Giderler', icon: TrendingDown },
     { id: 'recurring', label: 'Periyodikler', icon: Repeat },
@@ -491,7 +491,7 @@ export default function App() {
             }} />
           )}
           {currentView === 'sales' && <Sales />}
-          {currentView === 'cash' && <CashManagement />}
+          {currentView === 'cash' && <FinanceModule settings={settings} />}
           {currentView === 'income' && <Transactions initialType="Income" settings={settings} />}
           {currentView === 'expense' && <Expenses settings={settings} />}
           {currentView === 'recurring' && <RecurringPayments settings={settings} />}

@@ -358,6 +358,23 @@ try { db.exec("ALTER TABLE sale_items ADD COLUMN unit_price REAL DEFAULT 0"); } 
 try { db.exec("ALTER TABLE sale_items ADD COLUMN purchase_cost REAL DEFAULT 0"); } catch(e) {}
 try { db.exec("ALTER TABLE sale_items ADD COLUMN net_profit REAL DEFAULT 0"); } catch(e) {}
 
+try { db.exec("ALTER TABLE transactions ADD COLUMN payer_person_id TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN will_be_refunded INTEGER DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN refund_status TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN is_invoice INTEGER DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN invoice_name TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN is_stock_related INTEGER DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN distribute_to_product_cost INTEGER DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN document_url TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN currency TEXT DEFAULT 'TRY'"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN amount_try REAL DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN is_deleted INTEGER DEFAULT 0"); } catch(e) {}
+
+try { db.exec("ALTER TABLE cash_accounts ADD COLUMN credit_limit REAL DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE cash_accounts ADD COLUMN cutoff_day INTEGER"); } catch(e) {}
+try { db.exec("ALTER TABLE cash_accounts ADD COLUMN payment_due_day INTEGER"); } catch(e) {}
+try { db.exec("ALTER TABLE cash_accounts ADD COLUMN is_liability INTEGER DEFAULT 0"); } catch(e) {}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS expense_attachments (
     id TEXT PRIMARY KEY,
@@ -1102,7 +1119,7 @@ async function startServer() {
       SELECT t.*, 
              (SELECT COUNT(*) FROM expense_attachments WHERE expense_id = t.id) as attachment_count
       FROM transactions t 
-      WHERE t.type = 'Expense'
+      WHERE t.type = 'Expense' AND (t.is_deleted = 0 OR t.is_deleted IS NULL)
       ORDER BY t.date DESC
     `).all();
     res.json(expenses);
@@ -1123,29 +1140,40 @@ async function startServer() {
   });
 
   app.post("/api/expenses", (req, res) => {
-    const { date, category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number, cash_account_id } = req.body;
+    const { 
+      date, category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number, 
+      cash_account_id, currency, exchange_rate, amount_try, payer_person_id, will_be_refunded, refund_status, is_invoice, 
+      invoice_name, is_stock_related, distribute_to_product_cost 
+    } = req.body;
     const txId = uuidv4();
     
     try {
       db.transaction(() => {
-        if (!cash_account_id) throw new Error("Gider eklerken kasa hesabı seçimi zorunludur.");
-        const account = db.prepare("SELECT * FROM cash_accounts WHERE id = ?").get(cash_account_id) as any;
-        if (!account) throw new Error("Geçersiz kasa hesabı.");
-        if (account.is_active === 0) throw new Error("Seçili kasa hesabı pasif.");
+        const activeRate = exchange_rate || getActiveExchangeRate();
+        if (!activeRate || activeRate <= 0) throw new Error("Döviz kuru geçerli değil.");
+        
+        const actualAccountId = payer_person_id || cash_account_id;
+        if (!actualAccountId) throw new Error("Gider eklerken ödeme hesabı veya ödeyen kişi seçimi zorunludur.");
+        const account = db.prepare("SELECT * FROM cash_accounts WHERE id = ?").get(actualAccountId) as any;
+        if (!account) throw new Error("Geçersiz hesap.");
+        if (account.is_active === 0) throw new Error("Seçili hesap pasif.");
         if (amount <= 0) throw new Error("Tutar 0'dan büyük olmalıdır.");
-
-        const activeRate = getActiveExchangeRate();
-        if (!activeRate || activeRate <= 0) throw new Error("Güncel döviz kuru bulunamadı. Lütfen ayarlardan kuru yenileyin.");
 
         db.prepare(`
           INSERT INTO cash_transactions (id, account_id, type, amount, currency, exchange_rate_at_transaction, source_type, source_id, description)
           VALUES (?, ?, 'OUT', ?, ?, ?, 'expense', ?, ?)
-        `).run(uuidv4(), cash_account_id, amount, account.currency, activeRate, txId, `Gider: ${category} - ${title || note}`);
+        `).run(uuidv4(), actualAccountId, amount, currency || 'TRY', activeRate, txId, `Gider: ${category} - ${title || note}`);
 
         db.prepare(`
-          INSERT INTO transactions (id, date, type, category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number, cash_account_id, exchange_rate_at_transaction)
-          VALUES (?, ?, 'Expense', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(txId, date || new Date().toISOString(), category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number, cash_account_id, activeRate);
+          INSERT INTO transactions (
+            id, date, type, category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number, cash_account_id, exchange_rate_at_transaction,
+            currency, amount_try, payer_person_id, will_be_refunded, refund_status, is_invoice, invoice_name, is_stock_related, distribute_to_product_cost
+          )
+          VALUES (?, ?, 'Expense', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          txId, date || new Date().toISOString(), category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number, cash_account_id, activeRate,
+          currency || 'TRY', amount_try || amount * activeRate, payer_person_id, will_be_refunded || 0, refund_status, is_invoice || 0, invoice_name, is_stock_related || 0, distribute_to_product_cost || 0
+        );
         
         logActivity('CREATE', 'expense', txId, { after: req.body });
       })();
@@ -1156,15 +1184,24 @@ async function startServer() {
   });
 
   app.put("/api/expenses/:id", (req, res) => {
-    const { date, category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number } = req.body;
+    const { 
+      date, category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number,
+      currency, exchange_rate, amount_try, payer_person_id, will_be_refunded, refund_status, is_invoice, invoice_name, 
+      is_stock_related, distribute_to_product_cost, cash_account_id
+    } = req.body;
     
     const beforeState = db.prepare("SELECT * FROM transactions WHERE id = ?").get(req.params.id);
     
     db.prepare(`
       UPDATE transactions
-      SET date = ?, category = ?, platform = ?, amount = ?, note = ?, reference_number = ?, title = ?, description = ?, payment_method = ?, supplier = ?, invoice_number = ?
+      SET date = ?, category = ?, platform = ?, amount = ?, note = ?, reference_number = ?, title = ?, description = ?, payment_method = ?, supplier = ?, invoice_number = ?,
+          currency = ?, amount_try = ?, payer_person_id = ?, will_be_refunded = ?, refund_status = ?, is_invoice = ?, invoice_name = ?, is_stock_related = ?, distribute_to_product_cost = ?, cash_account_id = ?
       WHERE id = ? AND type = 'Expense'
-    `).run(date || new Date().toISOString(), category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number, req.params.id);
+    `).run(
+      date || new Date().toISOString(), category, platform, amount, note, reference_number, title, description, payment_method, supplier, invoice_number,
+      currency || 'TRY', amount_try || amount, payer_person_id, will_be_refunded || 0, refund_status, is_invoice || 0, invoice_name, is_stock_related || 0, distribute_to_product_cost || 0, cash_account_id,
+      req.params.id
+    );
     
     logActivity('UPDATE', 'expense', req.params.id, { before: beforeState, after: req.body });
     res.json({ success: true });
@@ -1172,16 +1209,9 @@ async function startServer() {
 
   app.delete("/api/expenses/:id", (req, res) => {
     const beforeState = db.prepare("SELECT * FROM transactions WHERE id = ?").get(req.params.id);
-    
-    const attachments = db.prepare("SELECT file_path FROM expense_attachments WHERE expense_id = ?").all(req.params.id) as any[];
-    for(const att of attachments) {
-      if (att.file_path && fs.existsSync(path.join(process.cwd(), att.file_path))) {
-         try { fs.unlinkSync(path.join(process.cwd(), att.file_path)); } catch(e) {}
-      }
-    }
-    
-    db.prepare("DELETE FROM transactions WHERE id = ?").run(req.params.id);
-    logActivity('DELETE', 'expense', req.params.id, { before: beforeState, after: {} });
+    db.prepare("UPDATE transactions SET is_deleted = 1 WHERE id = ?").run(req.params.id);
+    db.prepare("DELETE FROM cash_transactions WHERE source_type = 'expense' AND source_id = ?").run(req.params.id);
+    logActivity('DELETE', 'expense', req.params.id, { before: beforeState, after: { is_deleted: 1 } });
     res.json({ success: true });
   });
 
@@ -1219,6 +1249,86 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  app.get("/api/finance-summary", (req, res) => {
+    try {
+      // 1. Toplam Sermaye Girişi
+      const capitalRes = db.prepare("SELECT SUM(amount * exchange_rate_at_transaction) as total FROM cash_transactions WHERE source_type = 'capital_injection'").get() as any;
+      const capitalInjection = capitalRes?.total || 0;
+
+      // 2. Satış Geliri
+      const salesRes = db.prepare(`
+        SELECT SUM(si.quantity * si.unit_price) as total_sales
+        FROM sale_items si
+        JOIN sales s ON si.sale_id = s.id
+      `).get() as any;
+      const salesRevenue = salesRes?.total_sales || 0;
+
+      // 3. Toplam Gider (is_stock_related = 0)
+      const expensesRes = db.prepare("SELECT SUM(amount_try) as total FROM transactions WHERE type='Expense' AND is_stock_related=0 AND (is_deleted=0 OR is_deleted IS NULL)").get() as any;
+      const totalExpense = expensesRes?.total || 0;
+
+      // 4. Stoka Bağlanan Sermaye
+      // Active stock value based on purchase_cost * total_stock. Calculate dynamically or just use current stock
+      const stockRes = db.prepare(`
+        SELECT SUM(p.purchase_cost * COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0)) as total
+        FROM products p
+      `).get() as any;
+      const capitalInStock = stockRes?.total || 0;
+
+      // 5. Şirket Kredi Kartı Borcu
+      // Sum of negative balances of 'credit_card' liability accounts.
+      let ccDebt = 0;
+      let personalDebt = 0;
+      let existingCash = 0;
+
+      const accountsRes = db.prepare(`
+        SELECT ca.id, ca.type, ca.is_liability, ca.opening_balance,
+               (SELECT SUM(CASE WHEN type='IN' THEN amount * exchange_rate_at_transaction ELSE -amount*exchange_rate_at_transaction END) FROM cash_transactions WHERE account_id = ca.id) as net_flow
+        FROM cash_accounts ca
+        WHERE ca.is_active = 1
+      `).all() as any[];
+
+      for(const acc of accountsRes) {
+         let bal = (acc.opening_balance || 0) + (acc.net_flow || 0); // Note: opening_balance might need to be converted to TRY, but assuming TRY for simplicity or use activeRate.
+         if (acc.is_liability === 1 || acc.type === 'credit_card' || acc.type === 'personal_card' || acc.type === 'personal_current_account') {
+            if (bal < 0) {
+               if (acc.type === 'credit_card') ccDebt += Math.abs(bal);
+               else personalDebt += Math.abs(bal);
+            }
+         } else {
+            if (bal > 0) existingCash += bal;
+         }
+      }
+
+      // 8. Net Kullanılabilir Nakit (Mevcut Kasa - Kısa Vadeli Borçlar)
+      const netCash = existingCash - ccDebt - personalDebt;
+
+      // 9. Tahmini Net Kar (Satış Geliri + Diğer Gelirler? - Toplam Gider - Ürün Maliyeti (satılan ürünlerin maliyeti))
+      const cogsRes = db.prepare(`
+        SELECT SUM(si.quantity * si.purchase_cost) as total_cogs
+        FROM sale_items si
+        JOIN sales s ON si.sale_id = s.id
+      `).get() as any;
+      const totalCogs = cogsRes?.total_cogs || 0;
+
+      const netProfit = salesRevenue - totalCogs - totalExpense;
+
+      res.json({
+        capitalInjection,
+        salesRevenue,
+        totalExpense,
+        capitalInStock,
+        ccDebt,
+        personalDebt,
+        existingCash,
+        netCash,
+        netProfit,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Cash Management
   app.get("/api/cash-accounts", (req, res) => {
     try {
@@ -1232,11 +1342,11 @@ async function startServer() {
   app.post("/api/cash-accounts", (req, res) => {
     try {
       const id = uuidv4();
-      const { name, currency, type, opening_balance } = req.body;
+      const { name, currency, type, opening_balance, credit_limit, cutoff_day, payment_due_day, is_liability } = req.body;
       db.prepare(`
-        INSERT INTO cash_accounts (id, name, currency, type, opening_balance)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(id, name, currency, type, opening_balance || 0);
+        INSERT INTO cash_accounts (id, name, currency, type, opening_balance, credit_limit, cutoff_day, payment_due_day, is_liability)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, name, currency, type, opening_balance || 0, credit_limit || 0, cutoff_day, payment_due_day, is_liability || 0);
       res.json({ success: true, id });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1262,6 +1372,30 @@ async function startServer() {
         ORDER BY ct.created_at DESC
       `).all();
       res.json(txs);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/cash-deposit", (req, res) => {
+    try {
+      const { account_id, amount, description, source_type } = req.body;
+      const amountNum = parseFloat(amount);
+      if (amountNum <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
+      
+      const account = db.prepare("SELECT * FROM cash_accounts WHERE id = ?").get(account_id) as any;
+      if (!account) return res.status(404).json({ error: "Account not found" });
+
+      const txId = uuidv4();
+      const desc = description || `Deposit: ${source_type}`;
+      
+      db.prepare(`
+        INSERT INTO cash_transactions (id, account_id, type, amount, currency, exchange_rate_at_transaction, source_type, description)
+        VALUES (?, ?, 'IN', ?, ?, ?, ?, ?)
+      `).run(txId, account_id, amountNum, account.currency, 1, source_type || 'deposit', desc);
+      
+      logActivity('CREATE', 'cash_deposit', txId, { after: { account_id, amount, source_type } });
+      res.json({ success: true, id: txId });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1326,36 +1460,52 @@ async function startServer() {
       SELECT t.*, p.title as product_title 
       FROM transactions t 
       LEFT JOIN products p ON t.product_id = p.id 
+      WHERE t.is_deleted = 0 OR t.is_deleted IS NULL
       ORDER BY t.date DESC
     `).all();
     res.json(transactions);
   });
 
   app.post("/api/transactions", (req, res) => {
-    const { date, type, category, platform, amount, product_id, note, reference_number, supplier, invoice_number, expense_type, cash_account_id } = req.body;
+    const { 
+      date, type, category, platform, amount, product_id, note, reference_number, supplier, invoice_number, expense_type, cash_account_id,
+      currency, exchange_rate, amount_try, payer_person_id, will_be_refunded, refund_status, is_invoice, invoice_name, 
+      is_stock_related, distribute_to_product_cost, document_url
+    } = req.body;
+    
     const txId = uuidv4();
     try {
        db.transaction(() => {
-          const activeRate = getActiveExchangeRate();
-          if (!activeRate || activeRate <= 0) throw new Error("Güncel döviz kuru bulunamadı. Lütfen ayarlardan kuru yenileyin.");
+          const activeRate = exchange_rate || getActiveExchangeRate();
+          if (!activeRate || activeRate <= 0) throw new Error("Döviz kuru geçerli değil.");
+
+          // Insert expense record
+          db.prepare(`
+            INSERT INTO transactions (
+              id, date, type, category, platform, amount, product_id, note, reference_number, supplier, invoice_number, expense_type, cash_account_id, exchange_rate_at_transaction,
+              currency, amount_try, payer_person_id, will_be_refunded, refund_status, is_invoice, invoice_name, is_stock_related, distribute_to_product_cost, document_url
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            txId, date || new Date().toISOString(), type, category, platform, amount, product_id, note, reference_number, supplier, invoice_number, expense_type, cash_account_id, activeRate,
+            currency || 'TRY', amount_try || amount * activeRate, payer_person_id, will_be_refunded || 0, refund_status, is_invoice || 0, invoice_name, is_stock_related || 0, distribute_to_product_cost || 0, document_url
+          );
 
           if (type === 'Expense') {
-            if (!cash_account_id) throw new Error("Gider eklerken kasa hesabı seçimi zorunludur.");
-            const account = db.prepare("SELECT * FROM cash_accounts WHERE id = ?").get(cash_account_id) as any;
-            if (!account) throw new Error("Geçersiz kasa hesabı.");
-            if (account.is_active === 0) throw new Error("Seçili kasa hesabı pasif.");
+            const actualPaymentAccountId = payer_person_id || cash_account_id;
+            if (!actualPaymentAccountId) throw new Error("Gider eklerken ödeme hesabı veya ödeyen kişi seçimi zorunludur.");
+            
+            const account = db.prepare("SELECT * FROM cash_accounts WHERE id = ?").get(actualPaymentAccountId) as any;
+            if (!account) throw new Error("Geçersiz hesap.");
+            if (account.is_active === 0) throw new Error("Seçili hesap pasif.");
             if (amount <= 0) throw new Error("Tutar 0'dan büyük olmalıdır.");
 
+            // Decrease balance or increase debt for the payment account
             db.prepare(`
               INSERT INTO cash_transactions (id, account_id, type, amount, currency, exchange_rate_at_transaction, source_type, source_id, description)
               VALUES (?, ?, 'OUT', ?, ?, ?, 'expense', ?, ?)
-            `).run(uuidv4(), cash_account_id, amount, account.currency, activeRate, txId, `Gider: ${category} - ${note}`);
+            `).run(uuidv4(), actualPaymentAccountId, amount, currency || 'TRY', activeRate, txId, `Gider: ${category} - ${note}`);
           }
-
-          db.prepare(`
-            INSERT INTO transactions (id, date, type, category, platform, amount, product_id, note, reference_number, supplier, invoice_number, expense_type, cash_account_id, exchange_rate_at_transaction)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(txId, date || new Date().toISOString(), type, category, platform, amount, product_id, note, reference_number, supplier, invoice_number, expense_type, cash_account_id, activeRate);
           
           logActivity('CREATE', 'transaction', txId, { 
             before: {}, 
@@ -1370,8 +1520,10 @@ async function startServer() {
 
   app.delete("/api/transactions/:id", (req, res) => {
     const beforeState = db.prepare("SELECT * FROM transactions WHERE id = ?").get(req.params.id);
-    db.prepare("DELETE FROM transactions WHERE id = ?").run(req.params.id);
-    logActivity('DELETE', 'transaction', req.params.id, { before: beforeState, after: {} });
+    db.prepare("UPDATE transactions SET is_deleted = 1 WHERE id = ?").run(req.params.id);
+    // Remove associated cash transactions to reflect soft delete
+    db.prepare("DELETE FROM cash_transactions WHERE source_type = 'expense' AND source_id = ?").run(req.params.id);
+    logActivity('DELETE', 'transaction', req.params.id, { before: beforeState, after: { is_deleted: 1 } });
     res.json({ success: true });
   });
 

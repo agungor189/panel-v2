@@ -48,6 +48,17 @@ export interface Transaction {
   platform: string;
   amount: number;
   exchange_rate_at_transaction?: number;
+  currency?: string;
+  amount_try?: number;
+  cash_account_id?: string;
+  payer_person_id?: string;
+  will_be_refunded?: number;
+  refund_status?: string;
+  is_invoice?: number;
+  invoice_name?: string;
+  is_stock_related?: number;
+  distribute_to_product_cost?: number;
+  document_url?: string;
   product_id?: string;
   product_title?: string;
   note: string;
