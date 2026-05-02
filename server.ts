@@ -666,27 +666,46 @@ async function fetchExchangeRate() {
   let source = '';
   
   try {
-    // Primary: TCMB
-    const tcmbRes = await fetch("https://www.tcmb.gov.tr/kurlar/today.xml");
-    if (tcmbRes.ok) {
-       const text = await tcmbRes.text();
-       const match = text.match(/<Currency[^>]*Kod="USD"[\s\S]*?<ForexSelling>(.*?)<\/ForexSelling>/);
-       if (match && match[1]) {
-          rate = parseFloat(match[1]);
-          source = 'TCMB';
-       }
-    }
-    
-    // Backup (exchangerate-api)
-    if (!rate || rate <= 0) {
-      const backupRes = await fetch("https://open.er-api.com/v6/latest/USD");
-      if (backupRes.ok) {
-         const data = await backupRes.json();
-         if (data?.rates?.TRY) {
-            rate = data.rates.TRY;
-            source = 'open.er-api.com';
+    // Primary: Yahoo Finance (Real-time)
+    try {
+      const yahooRes = await fetch("https://query1.finance.yahoo.com/v8/finance/chart/TRY=X");
+      if (yahooRes.ok) {
+         const data = await yahooRes.json();
+         const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+         if (price && price > 0) {
+            rate = parseFloat(price);
+            source = 'Yahoo Finance';
          }
       }
+    } catch(e) {}
+
+    // Secondary: open.er-api.com
+    if (!rate || rate <= 0) {
+      try {
+        const backupRes = await fetch("https://open.er-api.com/v6/latest/USD");
+        if (backupRes.ok) {
+           const data = await backupRes.json();
+           if (data?.rates?.TRY) {
+              rate = data.rates.TRY;
+              source = 'open.er-api.com';
+           }
+        }
+      } catch(e) {}
+    }
+
+    // Tertiary: TCMB
+    if (!rate || rate <= 0) {
+      try {
+        const tcmbRes = await fetch("https://www.tcmb.gov.tr/kurlar/today.xml");
+        if (tcmbRes.ok) {
+           const text = await tcmbRes.text();
+           const match = text.match(/<Currency[^>]*Kod="USD"[\s\S]*?<ForexSelling>(.*?)<\/ForexSelling>/);
+           if (match && match[1]) {
+              rate = parseFloat(match[1]);
+              source = 'TCMB';
+           }
+        }
+      } catch(e) {}
     }
 
     if (rate > 0) {
