@@ -84,7 +84,7 @@ export default function SalesList({ onSaleClick }: { onSaleClick?: (sale: any) =
                   {sale.total_quantity}
                 </td>
                 <td className="px-6 py-4 text-center text-xs text-text-muted font-bold">
-                  {sale.total_weight ? `${sale.total_weight} gr` : '-'}
+                  {sale.total_weight ? `${sale.total_weight.toFixed(2)} kg` : '-'}
                 </td>
                 <td className="px-6 py-4 text-center">
                   <span className="font-bold text-primary bg-primary/10 px-3 py-1 rounded-lg">

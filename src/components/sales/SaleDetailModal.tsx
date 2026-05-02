@@ -191,7 +191,7 @@ export default function SaleDetailModal({ sale, onClose, onUpdated }: { sale: an
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-6 bg-gray-50 border border-gray-200 rounded-2xl">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 p-6 bg-gray-50 border border-gray-200 rounded-2xl">
              <div>
                 <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Alt Toplam</div>
                 <div className="mt-1 font-bold text-gray-800"><FormatAmount amount={sale.total_amount} exchangeRateAtTransaction={sale.exchange_rate_at_transaction} /></div>
@@ -201,12 +201,16 @@ export default function SaleDetailModal({ sale, onClose, onUpdated }: { sale: an
                 <div className="mt-1 font-bold text-red-500">- <FormatAmount amount={sale.discount || 0} exchangeRateAtTransaction={sale.exchange_rate_at_transaction} /></div>
              </div>
              <div>
+                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Toplam Ağırlık</div>
+                <div className="mt-1 font-bold text-orange-500">{sale.total_weight ? `${sale.total_weight.toFixed(2)} kg` : '-'}</div>
+             </div>
+             <div>
                 <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Kargo / Gider</div>
                 <div className="mt-1 font-bold text-orange-500">- <FormatAmount amount={(sale.shipping_cost || 0) + (sale.packaging_cost || 0) + (sale.other_expenses || 0) + (sale.ad_spend || 0)} exchangeRateAtTransaction={sale.exchange_rate_at_transaction} /></div>
              </div>
              <div>
                 <div className="text-[10px] font-bold text-primary uppercase tracking-wider">Net Toplam</div>
-                <div className="mt-1 text-2xl font-black text-primary"><FormatAmount amount={sale.net_total || 0} exchangeRateAtTransaction={sale.exchange_rate_at_transaction} /></div>
+                <div className="mt-1 text-xl font-black text-primary"><FormatAmount amount={sale.net_total || 0} exchangeRateAtTransaction={sale.exchange_rate_at_transaction} /></div>
              </div>
           </div>
         </div>

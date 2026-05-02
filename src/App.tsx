@@ -7,6 +7,7 @@ import {
   TrendingDown,
   Settings as SettingsIcon,
   BarChart3,
+  BarChart2,
   Repeat,
   Search,
   Bell,
@@ -30,6 +31,7 @@ import ProductWizard from './components/ProductWizard';
 import Transactions from './components/Transactions';
 import Expenses from './components/Expenses';
 import Analytics from './components/Analytics';
+import ProductAnalyticsPage from './pages/ProductAnalyticsPage';
 import RecurringPayments from './components/RecurringPayments';
 import SettingsView from './components/SettingsView';
 import ActivityLogs from './components/ActivityLogs';
@@ -55,7 +57,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type View = 'dashboard' | 'products' | 'product-detail' | 'product-wizard' | 'stock' | 'income' | 'expense' | 'recurring' | 'analytics' | 'settings' | 'activity-logs' | 'b2b' | 'sales' | 'api-keys' | 'panel-api' | 'cash';
+type View = 'dashboard' | 'products' | 'product-detail' | 'product-wizard' | 'stock' | 'income' | 'expense' | 'recurring' | 'analytics' | 'product-analytics' | 'settings' | 'activity-logs' | 'b2b' | 'sales' | 'api-keys' | 'panel-api' | 'cash';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -167,7 +169,8 @@ export default function App() {
     { id: 'income', label: 'Gelirler', icon: TrendingUp },
     { id: 'expense', label: 'Giderler', icon: TrendingDown },
     { id: 'recurring', label: 'Periyodikler', icon: Repeat },
-    { id: 'analytics', label: 'Analizler', icon: BarChart3 },
+    { id: 'analytics', label: 'Genel Analizler', icon: BarChart3 },
+    { id: 'product-analytics', label: 'Ürün Analizi', icon: BarChart2 },
   ];
 
   const { viewCurrency, setViewCurrency, activeRate, rateSource, rateFetchedAt, isRateLoading, isRateError, refreshRate } = useCurrency();
@@ -507,6 +510,7 @@ export default function App() {
           {currentView === 'expense' && <Expenses settings={settings} />}
           {currentView === 'recurring' && <RecurringPayments settings={settings} />}
           {currentView === 'analytics' && <Analytics settings={settings} initialTab={analyticsTab} />}
+          {currentView === 'product-analytics' && <ProductAnalyticsPage />}
           {currentView === 'activity-logs' && <ActivityLogs />}
           {currentView === 'settings' && <SettingsView onUpdate={loadSettings} />}
           {currentView === 'api-keys' && <ApiKeys />}

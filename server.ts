@@ -12,6 +12,8 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import AdmZip from "adm-zip";
 import crypto from "crypto";
+import { createProductAnalyticsRouter } from "./server/routes/productAnalyticsRoutes.js";
+import { generateNormalizedFields } from "./server/utils/normalizeProductFields.js";
 
 declare global {
   namespace Express {
@@ -104,6 +106,10 @@ db.exec(`
     profit_percentage REAL DEFAULT 0,
     exchange_rate_used REAL DEFAULT 0,
     price_locked BOOLEAN DEFAULT 0,
+    normalized_material TEXT,
+    normalized_model TEXT,
+    normalized_size TEXT,
+    normalized_tube_type TEXT,
     status TEXT DEFAULT 'Active',
     weight REAL DEFAULT 0,
     notes TEXT,
@@ -143,8 +149,38 @@ try {
   db.exec("ALTER TABLE products ADD COLUMN weight REAL DEFAULT 0");
 } catch(e) {}
 try {
+  db.exec("ALTER TABLE products ADD COLUMN normalized_material TEXT");
+} catch(e) {}
+try {
+  db.exec("ALTER TABLE products ADD COLUMN normalized_model TEXT");
+} catch(e) {}
+try {
+  db.exec("ALTER TABLE products ADD COLUMN normalized_size TEXT");
+} catch(e) {}
+try {
+  db.exec("ALTER TABLE products ADD COLUMN normalized_tube_type TEXT");
+} catch(e) {}
+try {
   db.exec("ALTER TABLE api_keys ADD COLUMN deleted_at DATETIME DEFAULT NULL");
 } catch(e) {}
+
+// Backfill normalized fields for existing products if they are null
+try {
+  const unnormalizedProducts = db.prepare("SELECT id, material, model, size, category, name FROM products WHERE normalized_material IS NULL").all();
+  if (unnormalizedProducts.length > 0) {
+    console.log(`Backfilling normalized fields for ${unnormalizedProducts.length} products...`);
+    const updateProduct = db.prepare("UPDATE products SET normalized_material=?, normalized_model=?, normalized_size=?, normalized_tube_type=? WHERE id=?");
+    db.transaction(() => {
+      for (const p of unnormalizedProducts) {
+        const { normalized_material, normalized_model, normalized_size, normalized_tube_type } = generateNormalizedFields(p);
+        updateProduct.run(normalized_material, normalized_model, normalized_size, normalized_tube_type, p.id);
+      }
+    })();
+    console.log("Backfill complete.");
+  }
+} catch(e) {
+  console.error("Backfill failed", e);
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS product_images (
@@ -1027,16 +1063,19 @@ async function startServer() {
       weight, status, notes, platforms, images, material, size, connection_type, usage_area, supplier, min_stock_level
     } = req.body;
     
+    const { normalized_material, normalized_model, normalized_size, normalized_tube_type } = generateNormalizedFields({ material, model, size, category, name });
+
     const insertProduct = db.prepare(`
-      INSERT INTO products (id, name, title, warehouse_location, sku, barcode, category, model, description, purchase_price_usd, purchase_cost, sale_price, buffer_percentage, profit_percentage, exchange_rate_used, price_locked, weight, status, notes, material, size, connection_type, usage_area, supplier, min_stock_level)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products (id, name, title, warehouse_location, sku, barcode, category, model, description, purchase_price_usd, purchase_cost, sale_price, buffer_percentage, profit_percentage, exchange_rate_used, price_locked, weight, status, notes, material, size, connection_type, usage_area, supplier, min_stock_level, normalized_material, normalized_model, normalized_size, normalized_tube_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     db.transaction(() => {
       insertProduct.run(
         id, name, title, warehouse_location, sku || `SKU-${Date.now()}`, barcode, category, model, description, 
         purchase_price_usd || 0, purchase_cost || 0, sale_price || 0, buffer_percentage || 0, profit_percentage || 0, exchange_rate_used || 0, price_locked ? 1 : 0, 
-        weight || 0, status, notes, material, size, connection_type, usage_area, supplier, min_stock_level !== undefined ? min_stock_level : 50
+        weight || 0, status, notes, material, size, connection_type, usage_area, supplier, min_stock_level !== undefined ? min_stock_level : 50,
+        normalized_material, normalized_model, normalized_size, normalized_tube_type
       );
       
       const insertPlatform = db.prepare(`
@@ -1101,6 +1140,8 @@ async function startServer() {
       weight, status, notes, platforms, images, material, size, connection_type, usage_area, supplier, min_stock_level 
     } = req.body;
     
+    const { normalized_material, normalized_model, normalized_size, normalized_tube_type } = generateNormalizedFields({ material, model, size, category, name });
+
     db.transaction(() => {
       const beforeState: any = db.prepare("SELECT * FROM products WHERE id = ?").get(req.params.id);
       if (beforeState) {
@@ -1112,12 +1153,14 @@ async function startServer() {
         UPDATE products SET 
           name=?, title=?, warehouse_location=?, sku=?, barcode=?, category=?, model=?, description=?, 
           purchase_price_usd=?, purchase_cost=?, sale_price=?, buffer_percentage=?, profit_percentage=?, exchange_rate_used=?, price_locked=?,
-          weight=?, status=?, notes=?, material=?, size=?, connection_type=?, usage_area=?, supplier=?, min_stock_level=?, updated_at=CURRENT_TIMESTAMP
+          weight=?, status=?, notes=?, material=?, size=?, connection_type=?, usage_area=?, supplier=?, min_stock_level=?, 
+          normalized_material=?, normalized_model=?, normalized_size=?, normalized_tube_type=?, updated_at=CURRENT_TIMESTAMP
         WHERE id=?
       `).run(
         name, title, warehouse_location, sku, barcode, category, model, description, 
         purchase_price_usd || 0, purchase_cost || 0, sale_price || 0, buffer_percentage || 0, profit_percentage || 0, exchange_rate_used || 0, price_locked ? 1 : 0,
-        weight || 0, status, notes, material, size, connection_type, usage_area, supplier, min_stock_level !== undefined ? min_stock_level : 50, req.params.id
+        weight || 0, status, notes, material, size, connection_type, usage_area, supplier, min_stock_level !== undefined ? min_stock_level : 50,
+        normalized_material, normalized_model, normalized_size, normalized_tube_type, req.params.id
       );
 
       db.prepare("DELETE FROM product_platforms WHERE product_id = ?").run(req.params.id);
@@ -2625,6 +2668,9 @@ async function startServer() {
     skipSuccessfulRequests: true,
     message: { success: false, error: { code: "TOO_MANY_REQUESTS", message: "Too many failed attempts" } }
   });
+
+
+  app.use("/api/analytics", createProductAnalyticsRouter(db));
 
   // --- PUBLIC API ROUTES ---
   app.use("/api/public", publicAuthFailedLimiter, publicApiLimiter);
