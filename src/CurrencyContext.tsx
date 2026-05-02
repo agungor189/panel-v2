@@ -12,6 +12,7 @@ interface CurrencyContextType {
   isRateLoading: boolean;
   isRateError: boolean;
   refreshRate: () => Promise<void>;
+  fetchRate: () => Promise<void>;
   FormatAmount: React.FC<{
     amount: number;
     originalCurrency?: 'TRY' | 'USD';
@@ -30,6 +31,7 @@ const CurrencyContext = createContext<CurrencyContextType>({
   isRateLoading: false,
   isRateError: false,
   refreshRate: async () => {},
+  fetchRate: async () => {},
   FormatAmount: () => <></>
 });
 
@@ -78,7 +80,9 @@ export const CurrencyProvider = ({ children }: { children: React.ReactNode }) =>
   };
 
   useEffect(() => {
-    fetchRate();
+    if (localStorage.getItem('token')) {
+      fetchRate();
+    }
   }, []);
 
   const FormatAmount: React.FC<{
@@ -137,6 +141,7 @@ export const CurrencyProvider = ({ children }: { children: React.ReactNode }) =>
       isRateLoading,
       isRateError,
       refreshRate,
+      fetchRate,
       FormatAmount
     }}>
       {children}

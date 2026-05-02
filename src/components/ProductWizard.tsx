@@ -12,6 +12,7 @@ import { api, PLATFORMS } from '../lib/api';
 import { Settings } from '../types';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { useCurrency } from '../CurrencyContext';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -25,6 +26,7 @@ interface ProductWizardProps {
 
 export default function ProductWizard({ productId, settings, onClose }: ProductWizardProps) {
   const [loading, setLoading] = useState(false);
+  const { activeRate } = useCurrency();
 
   const [formData, setFormData] = useState<any>({
     name: '',
@@ -41,7 +43,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
     sale_price: 0,
     buffer_percentage: settings?.default_buffer_percentage || 0,
     profit_percentage: settings?.default_profit_percentage || 0,
-    exchange_rate_used: settings?.usd_exchange_rate || 0,
+    exchange_rate_used: activeRate || 0,
     price_locked: false,
     weight: 0,
     min_stock_level: 50,
@@ -55,12 +57,12 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
       setFormData((prev: any) => ({ 
         ...prev, 
         category: prev.category || settings.product_categories[0],
-        exchange_rate_used: settings.usd_exchange_rate,
+        exchange_rate_used: activeRate,
         buffer_percentage: settings.default_buffer_percentage,
         profit_percentage: settings.default_profit_percentage || 0
       }));
     }
-  }, [settings, productId]);
+  }, [settings, productId, activeRate]);
 
   const [images, setImages] = useState<any[]>([]);
   const [newImages, setNewImages] = useState<File[]>([]);

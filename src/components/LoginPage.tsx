@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Lock, User, LogIn, Zap } from 'lucide-react';
+import { api } from '../lib/api';
 
 export default function LoginPage({ onLogin }: { onLogin: (role: 'admin' | 'user') => void }) {
   const [username, setUsername] = useState('');
@@ -7,33 +8,25 @@ export default function LoginPage({ onLogin }: { onLogin: (role: 'admin' | 'user
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError('');
     
-    // Simulate brief network delay for better UI feel
-    setTimeout(() => {
-      if (username === 'admin' && password === 'admin') {
-        try {
-          localStorage.setItem('isAuthenticated', 'true');
-          localStorage.setItem('userRole', 'admin');
-        } catch {
-          // ignore
-        }
-        onLogin('admin');
-      } else if (username === 'user' && password === 'user') {
-        try {
-          localStorage.setItem('isAuthenticated', 'true');
-          localStorage.setItem('userRole', 'user');
-        } catch {
-          // ignore
-        }
-        onLogin('user');
+    try {
+      const res = await api.post('/auth/login', { username, password });
+      if (res.success && res.token) {
+        localStorage.setItem('token', res.token);
+        localStorage.setItem('userRole', res.user.role);
+        onLogin(res.user.role);
       } else {
-        setError('Geçersiz kullanıcı adı veya şifre.');
-        setLoading(false);
+        setError(res.error?.message || 'Giriş başarısız.');
       }
-    }, 800);
+    } catch (err: any) {
+      setError(err.message || 'Giriş sırasında bir hata oluştu.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -59,9 +52,6 @@ export default function LoginPage({ onLogin }: { onLogin: (role: 'admin' | 'user
             <div className="text-center mb-8 lg:mb-10">
               <h2 className="text-2xl lg:text-3xl font-black text-text-main tracking-tight">Hoş Geldiniz</h2>
               <p className="text-sm text-text-muted mt-2 font-medium">Devam etmek için giriş yapın.</p>
-              <p className="text-[10px] text-text-muted font-bold uppercase tracking-[0.2em] mt-4 opacity-70">
-                Giriş Bilgileri: <span className="text-primary italic lowercase">admin / admin</span>
-              </p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">

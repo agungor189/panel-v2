@@ -1,5 +1,7 @@
 const API_URL = "";
 
+export const getToken = () => localStorage.getItem('token');
+
 const checkAccess = () => {
   const role = localStorage.getItem('userRole');
   if (role === 'user') {
@@ -7,26 +9,48 @@ const checkAccess = () => {
   }
 };
 
+const handleResponse = async (res: Response, skip401Reload = false) => {
+  const isAuthError = res.status === 401;
+  let data;
+  try {
+    data = await res.json();
+  } catch (e) {
+    if (!res.ok) throw new Error(res.statusText);
+  }
+
+  if (isAuthError && !skip401Reload) {
+    const hadToken = !!localStorage.getItem('token');
+    localStorage.removeItem('token');
+    localStorage.removeItem('userRole');
+    if (hadToken) {
+       window.location.href = '/'; // better than reload to avoid POST refresh
+    }
+  }
+  
+  if (!res.ok || data?.success === false) {
+     throw new Error(data?.error?.message || data?.error || 'Bir hata oluştu');
+  }
+  return data;
+};
+
 export const api = {
   get: async (endpoint: string) => {
     const res = await fetch(`${API_URL}/api${endpoint}`, {
-      headers: { "X-Frontend-Request": "true" }
+      headers: { "Authorization": `Bearer ${getToken()}` }
     });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
+    return handleResponse(res);
   },
   post: async (endpoint: string, data: any) => {
-    checkAccess();
+    if (!endpoint.startsWith('/auth/')) checkAccess();
     const res = await fetch(`${API_URL}/api${endpoint}`, {
       method: "POST",
       headers: { 
         "Content-Type": "application/json",
-        "X-Frontend-Request": "true"
+        "Authorization": `Bearer ${getToken()}`
       },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
+    return handleResponse(res, endpoint.startsWith('/auth/'));
   },
   put: async (endpoint: string, data: any) => {
     checkAccess();
@@ -34,31 +58,40 @@ export const api = {
       method: "PUT",
       headers: { 
         "Content-Type": "application/json",
-        "X-Frontend-Request": "true"
+        "Authorization": `Bearer ${getToken()}`
       },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
+    return handleResponse(res);
+  },
+  patch: async (endpoint: string, data: any) => {
+    checkAccess();
+    const res = await fetch(`${API_URL}/api${endpoint}`, {
+      method: "PATCH",
+      headers: { 
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${getToken()}`
+      },
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
   },
   delete: async (endpoint: string) => {
     checkAccess();
     const res = await fetch(`${API_URL}/api${endpoint}`, {
       method: "DELETE",
-      headers: { "X-Frontend-Request": "true" }
+      headers: { "Authorization": `Bearer ${getToken()}` }
     });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
+    return handleResponse(res);
   },
   upload: async (endpoint: string, formData: FormData) => {
     checkAccess();
     const res = await fetch(`${API_URL}/api${endpoint}`, {
       method: "POST",
-      headers: { "X-Frontend-Request": "true" },
+      headers: { "Authorization": `Bearer ${getToken()}` },
       body: formData,
     });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
+    return handleResponse(res);
   }
 };
 

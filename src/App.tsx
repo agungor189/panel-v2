@@ -62,7 +62,7 @@ type View = 'dashboard' | 'products' | 'product-detail' | 'product-wizard' | 'st
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('isAuthenticated') === 'true';
+      return !!localStorage.getItem('token');
     } catch {
       return false;
     }
@@ -111,7 +111,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    loadSettings();
+    if (localStorage.getItem('token')) {
+      loadSettings();
+    }
   }, []);
 
   const loadSettings = async () => {
@@ -123,10 +125,13 @@ export default function App() {
     }
   };
 
+  const { fetchRate } = useCurrency();
+
   const handleLogin = (role: 'admin' | 'user') => {
     setIsAuthenticated(true);
     setUserRole(role);
     loadSettings();
+    fetchRate();
   };
 
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -137,7 +142,7 @@ export default function App() {
 
   const handleConfirmLogout = () => {
     try {
-      localStorage.removeItem('isAuthenticated');
+      localStorage.removeItem('token');
       localStorage.removeItem('userRole');
     } catch {
       // ignore

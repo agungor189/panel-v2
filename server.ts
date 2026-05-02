@@ -12,6 +12,9 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import AdmZip from "adm-zip";
 import crypto from "crypto";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+import { z } from "zod";
 import { createProductAnalyticsRouter } from "./server/routes/productAnalyticsRoutes.js";
 import { generateNormalizedFields } from "./server/utils/normalizeProductFields.js";
 
@@ -508,7 +511,22 @@ db.exec(`
     is_visible INTEGER DEFAULT 1,
     config TEXT DEFAULT '{}'
   );
+
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT DEFAULT 'user',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
+
+const countUsers = db.prepare("SELECT COUNT(*) as count FROM users").get() as any;
+if (countUsers.count === 0) {
+  const hash = bcrypt.hashSync('admin', 10);
+  db.prepare("INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)").run(uuidv4(), 'admin', hash, 'admin');
+}
 
 const widgetsCount = db.prepare("SELECT COUNT(*) as count FROM dashboard_widgets").get() as any;
 if (widgetsCount.count === 0) {
@@ -619,6 +637,18 @@ const expenseUpload = multer({
 });
 const backupUpload = multer({ dest: os.tmpdir() });
 
+export const AppLogger = {
+  info: (category: string, message: string, data?: any) => {
+    console.log(JSON.stringify({ level: 'INFO', timestamp: new Date().toISOString(), category, message, data }));
+  },
+  warn: (category: string, message: string, data?: any) => {
+    console.warn(JSON.stringify({ level: 'WARN', timestamp: new Date().toISOString(), category, message, data }));
+  },
+  error: (category: string, message: string, error?: any) => {
+    console.error(JSON.stringify({ level: 'ERROR', timestamp: new Date().toISOString(), category, message, error: error?.message || error, stack: error?.stack }));
+  }
+};
+
 function logActivity(action: string, entity_type: string, entity_id: string, details?: any) {
   try {
     db.prepare(`
@@ -626,7 +656,7 @@ function logActivity(action: string, entity_type: string, entity_id: string, det
       VALUES (?, ?, ?, ?, ?)
     `).run(uuidv4(), action, entity_type, entity_id, details ? JSON.stringify(details) : null);
   } catch (err) {
-    console.error("Activity logging failed", err);
+    AppLogger.error('DATABASE_ERROR', 'Activity logging failed', err);
   }
 }
 
@@ -711,29 +741,90 @@ async function startServer() {
   });
   app.use(limiter);
 
-  app.use(cors());
+  const allowedOrigins = process.env.NODE_ENV === "production" 
+    ? [process.env.FRONTEND_URL || "https://your-production-domain.com"] 
+    : ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"];
+  
+  app.use(cors({ 
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      // Log disallowed origins instead of blocking completely during dev
+      if (process.env.NODE_ENV !== "production") {
+        return callback(null, true); 
+      }
+      callback(new Error("CORS policy violation"));
+    }
+  }));
   app.use(express.json({ limit: '10mb' })); // Limit JSON body size
   app.use("/uploads", express.static(uploadsDir, { maxAge: '1d' }));
 
+  const JWT_SECRET = process.env.JWT_SECRET || 'dsdst_secret_jwt_key_fallback';
+
+  const authRouter = express.Router();
+  authRouter.post('/login', (req, res) => {
+    try {
+       const { username, password } = req.body;
+       const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username) as any;
+       if (!user) return res.status(401).json({ success: false, error: { code: 'AUTH_FAILED', message: 'Geçersiz kullanıcı adı veya şifre' } });
+       
+       const valid = bcrypt.compareSync(password, user.password_hash);
+       if (!valid) return res.status(401).json({ success: false, error: { code: 'AUTH_FAILED', message: 'Geçersiz kullanıcı adı veya şifre' } });
+       
+       const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '12h' });
+       res.json({ success: true, token, user: { id: user.id, username: user.username, role: user.role } });
+    } catch (err: any) {
+       AppLogger.error('AUTH_ERROR', 'Login failed', err);
+       res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } });
+    }
+  });
+
+  authRouter.post('/logout', (req, res) => {
+    res.json({ success: true, message: 'Logged out' });
+  });
+
+  authRouter.get('/me', (req, res) => {
+     const authHeader = req.headers.authorization;
+     if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'No token' } });
+     try {
+       const token = authHeader.split(' ')[1];
+       const decoded = jwt.verify(token, JWT_SECRET);
+       res.json({ success: true, user: decoded });
+     } catch (err) {
+       res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid token' } });
+     }
+  });
+
+  app.use("/api/auth", authRouter);
+
   // API Authentication Middleware
   app.use("/api", (req, res, next) => {
-    // Let frontend requests bypass the strict api key check for now
-    if (req.headers['x-frontend-request'] === 'true') {
+    // allow auth routes
+    if (req.path.startsWith('/auth/')) return next();
+
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+       try {
+         const token = authHeader.split(' ')[1];
+         const decoded = jwt.verify(token, JWT_SECRET);
+         (req as any).user = decoded;
+         return next();
+       } catch (err: any) {
+         console.log("JWT Verification Error:", err.message, "Token:", authHeader.split(' ')[1]);
+         return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token.' } });
+       }
+    }
+
+    const apiKeyHeader = req.headers['x-api-key'] || (authHeader && !authHeader.startsWith('Bearer ') ? authHeader : undefined);
+    const settingsApiKey = db.prepare("SELECT value FROM settings WHERE key='api_key'").get() as any;
+    
+    if (settingsApiKey && settingsApiKey.value && apiKeyHeader === settingsApiKey.value) {
         return next();
     }
 
-    const apiKeyHeader = req.headers['x-api-key'] || req.headers['authorization']?.toString().replace('Bearer ', '');
-    const settingsApiKey = db.prepare("SELECT value FROM settings WHERE key='api_key'").get() as any;
-    
-    if (!settingsApiKey || !settingsApiKey.value) {
-        return res.status(403).json({ error: "API Key is not configured in settings. Please generate one from the DSDST Panel UI." });
-    }
-
-    if (apiKeyHeader !== settingsApiKey.value) {
-        return res.status(401).json({ error: "Unauthorized. Invalid API Key." });
-    }
-
-    next();
+    return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Unauthorized access.' } });
   });
 
   // --- API ROUTES ---
@@ -1032,6 +1123,67 @@ async function startServer() {
   });
 
   // Products CRUD
+  const productSchema = z.object({
+    name: z.string().optional(),
+    sku: z.string().min(1, "SKU boş bırakılamaz"),
+    purchase_cost: z.number().min(0, "Maliyet negatif olamaz").optional(),
+    sale_price: z.number().min(0, "Satış fiyatı negatif olamaz").optional(),
+    material: z.string().optional().default("Bilinmiyor"),
+    model: z.string().optional().default("Bilinmiyor"),
+    size: z.string().optional().default("Bilinmiyor"),
+    platforms: z.array(z.object({
+      name: z.string(),
+      stock: z.number().min(0, "Stok negatif olamaz")
+    })).optional()
+  }).passthrough();
+
+  app.post("/api/products/bulk-import", (req, res) => {
+    const items = req.body;
+    if (!Array.isArray(items)) {
+       return res.status(400).json({ success: false, error: { code: 'INVALID_ROOT', message: 'Payload array olmalıdır' } });
+    }
+
+    try {
+      db.transaction(() => {
+        for (const rawItem of items) {
+          const validated = productSchema.parse(rawItem) as any;
+          
+          // Duplicate check
+          const existing = db.prepare("SELECT id FROM products WHERE sku = ?").get(validated.sku) as any;
+          if (existing) {
+             throw new Error(`Duplicate SKU found: ${validated.sku}`);
+          }
+
+          const id = uuidv4();
+          const { normalized_material, normalized_model, normalized_size, normalized_tube_type } = generateNormalizedFields({ material: validated.material, model: validated.model, size: validated.size, category: validated.category, name: validated.name });
+
+          db.prepare(`
+            INSERT INTO products (id, name, title, sku, barcode, category, model, description, purchase_price_usd, purchase_cost, sale_price, buffer_percentage, profit_percentage, exchange_rate_used, price_locked, weight, status, material, size, connection_type, usage_area, supplier, min_stock_level, normalized_material, normalized_model, normalized_size, normalized_tube_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            id, validated.name, validated.title, validated.sku, validated.barcode, validated.category, validated.model, validated.description, 
+            validated.purchase_price_usd || 0, validated.purchase_cost || 0, validated.sale_price || 0, validated.buffer_percentage || 0, validated.profit_percentage || 0, validated.exchange_rate_used || 0, validated.price_locked ? 1 : 0, 
+            validated.weight || 0, validated.status || 'active', validated.material, validated.size, validated.connection_type, validated.usage_area, validated.supplier, validated.min_stock_level !== undefined ? validated.min_stock_level : 50,
+            normalized_material, normalized_model, normalized_size, normalized_tube_type
+          );
+
+          if (validated.platforms) {
+             for (const p of validated.platforms) {
+               db.prepare(`INSERT INTO product_platforms (id, product_id, platform_name, stock, price, is_listed) VALUES (?, ?, ?, ?, ?, ?)`).run(uuidv4(), id, p.name, p.stock || 0, p.price || validated.sale_price, p.is_listed ? 1 : 0);
+             }
+          }
+        }
+      })();
+      res.json({ success: true, message: `${items.length} ürün import edildi.` });
+    } catch (err: any) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: err.issues } });
+      }
+      AppLogger.error('IMPORT_ERROR', 'Bulk import failed', err);
+      res.status(400).json({ success: false, error: { code: 'IMPORT_FAILED', message: err.message } });
+    }
+  });
+
   app.get("/api/products", (req, res) => {
     const products = db.prepare(`
       SELECT p.*, 
@@ -1172,6 +1324,19 @@ async function startServer() {
 
       for (const p of platforms) {
         insertPlatform.run(uuidv4(), req.params.id, p.name, p.stock || 0, p.price || sale_price, p.is_listed ? 1 : 0);
+        
+        // Track stock movements
+        if (beforeState && beforeState.platforms) {
+           const oldPlat = beforeState.platforms.find((bp: any) => bp.platform_name === p.name);
+           const oldStock = oldPlat ? oldPlat.stock : 0;
+           const diff = (p.stock || 0) - oldStock;
+           if (diff !== 0) {
+              db.prepare(`
+                INSERT INTO stock_movements (id, product_id, platform_name, change_amount, reason)
+                VALUES (?, ?, ?, ?, ?)
+              `).run(uuidv4(), req.params.id, p.name, diff, 'Oto: Ürün Güncelleme');
+           }
+        }
       }
 
       if (images && Array.isArray(images)) {
@@ -2061,8 +2226,20 @@ async function startServer() {
     }
   });
 
+  const saleSchema = z.object({
+    customer_name: z.string().min(1, 'Müşteri adı boş olamaz').optional(),
+    commission_rate: z.coerce.number().min(0, 'Komisyon negatif olamaz').max(100, 'Komisyon maksimum %100 olabilir').optional().default(0),
+    discount: z.coerce.number().min(0, 'İndirim negatif olamaz').optional().default(0),
+    total_amount: z.coerce.number().min(0, 'Genel toplam negatif olamaz'),
+    items: z.array(z.object({
+      quantity: z.coerce.number().min(1, 'Satış miktarı 0 dan büyük olmalıdır'),
+      price: z.coerce.number().min(0, 'Birim fiyat negatif olamaz'),
+    }).passthrough())
+  });
+
   app.post("/api/sales", (req, res) => {
     try {
+      const validated = saleSchema.parse(req.body);
       const id = uuidv4();
       const { 
         customer_name, customer_phone, customer_address, 
@@ -2072,8 +2249,20 @@ async function startServer() {
       } = req.body;
       
       db.transaction(() => {
+        // Sepette aynı ürün birden fazla satırda varsa, stok hatasını engellemek için adetleri birleştir:
+        const mergedItemsMap = new Map();
+        for (const item of items) {
+          if (mergedItemsMap.has(item.product_id)) {
+             const existing = mergedItemsMap.get(item.product_id);
+             existing.quantity += Number(item.quantity);
+          } else {
+             mergedItemsMap.set(item.product_id, { ...item, quantity: Number(item.quantity) });
+          }
+        }
+        const mergedItems = Array.from(mergedItemsMap.values());
+
         let totalPurchaseCost = 0;
-        const processedItems = items.map((item: any) => {
+        const processedItems = mergedItems.map((item: any) => {
           const product = db.prepare("SELECT purchase_cost FROM products WHERE id = ?").get(item.product_id) as any;
           const pc = product?.purchase_cost || 0;
           totalPurchaseCost += (pc * item.quantity);
@@ -2183,7 +2372,11 @@ async function startServer() {
 
       res.json({ success: true, message: "Satış başarıyla kaydedildi.", id });
     } catch (err: any) {
-      res.status(400).json({ success: false, error: err.message });
+      if (err instanceof z.ZodError) {
+         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: err.issues } });
+      }
+      AppLogger.error('SALE_ERROR', 'Sale transaction failed', err);
+      res.status(400).json({ success: false, error: { code: 'SALE_FAILED', message: err.message } });
     }
   });
 
@@ -2747,10 +2940,14 @@ async function startServer() {
       db.transaction(() => {
         // 1. Fill purchase_price_usd from purchase_cost if purchase_price_usd is 0 and purchase_cost > 0
         // Use a default exchange rate if activeRate is not available, but let's assume we read settings
-        const settings = db.prepare("SELECT * FROM settings").get() as any;
-        const defaultRate = settings.usd_exchange_rate || 35; // fallback
-        const defaultBuffer = settings.default_buffer_percentage || 20;
-        const defaultProfit = settings.default_profit_percentage || 50;
+        const settingsRows = db.prepare("SELECT * FROM settings").all() as any[];
+        const settingsObj: any = {};
+        settingsRows.forEach((r: any) => settingsObj[r.key] = r.value);
+
+        const activeRateRow = db.prepare("SELECT * FROM exchange_rates WHERE is_active = 1 ORDER BY fetched_at DESC LIMIT 1").get() as any;
+        const defaultRate = activeRateRow?.rate || parseFloat(settingsObj.usd_exchange_rate) || 35; // fallback
+        const defaultBuffer = parseFloat(settingsObj.default_buffer_percentage) || 20;
+        const defaultProfit = parseFloat(settingsObj.default_profit_percentage) || 50;
 
         // Fetch products that need fixing
         const productsParams = db.prepare(`
@@ -2898,6 +3095,15 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({ error: "Restore failed: " + err.message });
     }
+  });
+
+  // Global Error Handler
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    AppLogger.error('REQUEST_ERROR', `Error processing ${req.method} ${req.url}`, err);
+    if (err instanceof z.ZodError) {
+       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: err.issues } });
+    }
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message || 'Bir hata oluştu' } });
   });
 
   // --- VITE MIDDLEWARE ---

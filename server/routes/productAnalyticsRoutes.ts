@@ -55,7 +55,7 @@ export function createProductAnalyticsRouter(db: Database.Database) {
         SELECT 
           COUNT(DISTINCT si.product_id) as productsSold,
           SUM(si.quantity) as totalSoldQty,
-          SUM(si.total_price) as totalRevenue,
+          SUM(si.unit_price * si.quantity) as totalRevenue,
           COUNT(DISTINCT p.id) as totalProducts
         FROM products p
         LEFT JOIN sale_items si ON ${salesFilter.joinCondition}
@@ -120,7 +120,7 @@ export function createProductAnalyticsRouter(db: Database.Database) {
         SELECT 
           IFNULL(p.normalized_material, 'Bilinmiyor') as material,
           SUM(si.quantity) as soldQty,
-          SUM(si.total_price) as revenue,
+          SUM(si.unit_price * si.quantity) as revenue,
           (SELECT SUM(w.quantity) FROM warehouse_stocks w WHERE w.product_id IN (SELECT id FROM products WHERE normalized_material = p.normalized_material)) as currentStock
         FROM products p
         LEFT JOIN sale_items si ON ${salesFilter.joinCondition}
@@ -147,7 +147,7 @@ export function createProductAnalyticsRouter(db: Database.Database) {
         SELECT 
           IFNULL(p.normalized_model, 'Bilinmiyor') as model,
           SUM(si.quantity) as soldQty,
-          SUM(si.total_price) as revenue,
+          SUM(si.unit_price * si.quantity) as revenue,
           (SELECT SUM(w.quantity) FROM warehouse_stocks w WHERE w.product_id IN (SELECT id FROM products WHERE normalized_model = p.normalized_model)) as currentStock
         FROM products p
         LEFT JOIN sale_items si ON ${salesFilter.joinCondition}
@@ -174,7 +174,7 @@ export function createProductAnalyticsRouter(db: Database.Database) {
         SELECT 
           IFNULL(p.normalized_size, 'Bilinmiyor') as size,
           SUM(si.quantity) as soldQty,
-          SUM(si.total_price) as revenue,
+          SUM(si.unit_price * si.quantity) as revenue,
           (SELECT SUM(w.quantity) FROM warehouse_stocks w WHERE w.product_id IN (SELECT id FROM products WHERE normalized_size = p.normalized_size)) as currentStock
         FROM products p
         LEFT JOIN sale_items si ON ${salesFilter.joinCondition}
@@ -205,7 +205,7 @@ export function createProductAnalyticsRouter(db: Database.Database) {
           IFNULL(p.normalized_tube_type, 'Bilinmiyor') as tubeType,
           COUNT(DISTINCT p.id) as skuCount,
           SUM(si.quantity) as soldQty,
-          SUM(si.total_price) as revenue,
+          SUM(si.unit_price * si.quantity) as revenue,
           (SELECT SUM(w.quantity) FROM warehouse_stocks w WHERE w.product_id = p.id) as currentStock
         FROM products p
         LEFT JOIN sale_items si ON ${salesFilter.joinCondition}
@@ -240,7 +240,7 @@ export function createProductAnalyticsRouter(db: Database.Database) {
           IFNULL(p.normalized_tube_type, 'Bilinmiyor') as tubeType,
           IFNULL((SELECT SUM(w.quantity) FROM warehouse_stocks w WHERE w.product_id = p.id), 0) as currentStock,
           IFNULL(SUM(si.quantity), 0) as soldQty,
-          IFNULL(SUM(si.total_price), 0) as revenue
+          IFNULL(SUM(si.unit_price * si.quantity), 0) as revenue
         FROM products p
         LEFT JOIN sale_items si ON ${salesFilter.joinCondition}
         LEFT JOIN sales s ON si.sale_id = s.id AND s.status != 'cancelled' AND s.type = 'sale'
