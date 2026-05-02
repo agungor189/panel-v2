@@ -26,7 +26,9 @@ import {
   Activity,
   Layers,
   Banknote,
-  Search
+  Search,
+  Network,
+  Filter
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useCurrency } from '../CurrencyContext';
@@ -46,6 +48,10 @@ export default function Analytics({ settings, initialTab }: { settings: Settings
   const { FormatAmount, activeRate } = useCurrency();
   const [activeTab, setActiveTab] = useState<string>(initialTab || 'financial');
   const [period, setPeriod] = useState<string>('this_month');
+  
+  const [matrixFilterMaterial, setMatrixFilterMaterial] = useState('Hepsi');
+  const [matrixFilterModel, setMatrixFilterModel] = useState('Hepsi');
+  const [matrixFilterSize, setMatrixFilterSize] = useState('Hepsi');
   
   const [sales, setSales] = useState<any[]>([]);
   const [saleItems, setSaleItems] = useState<any[]>([]);
@@ -163,6 +169,75 @@ export default function Analytics({ settings, initialTab }: { settings: Settings
      });
      return Object.values(groups).map(g => ({ ...g, margin: g.revenue > 0 ? (g.profit / g.revenue) * 100 : 0 })).sort((a, b) => b.revenue - a.revenue);
   }, [productStats]);
+
+  // --- İLERİ DÜZEY MATRİS (Advanced Matrix) ---
+  const advancedAnalysis = useMemo(() => {
+    const combos: Record<string, { material: string, model: string, size: string, soldQty: number, revenue: number, profit: number, stock: number, key: string }> = {};
+    const sizeTrends: Record<string, { size: string, soldQty: number, revenue: number, stock: number }> = {};
+    const materialModelTrends: Record<string, { material: string, model: string, soldQty: number, revenue: number, stock: number }> = {};
+    const materialSizeTrends: Record<string, { material: string, size: string, soldQty: number, revenue: number, stock: number }> = {};
+
+    const filteredProductStats = productStats.filter(p => {
+       const mat = p.material || 'Belirtilmedi';
+       const mod = p.model || 'Belirtilmedi';
+       const sz = p.size || 'Belirtilmedi';
+       
+       if (matrixFilterMaterial !== 'Hepsi' && mat !== matrixFilterMaterial) return false;
+       if (matrixFilterModel !== 'Hepsi' && mod !== matrixFilterModel) return false;
+       if (matrixFilterSize !== 'Hepsi' && sz !== matrixFilterSize) return false;
+       
+       return true;
+    });
+
+    const uniqueMaterials = ['Hepsi', ...new Set(productStats.map(p => p.material || 'Belirtilmedi'))].filter(Boolean);
+    const uniqueModels = ['Hepsi', ...new Set(productStats.map(p => p.model || 'Belirtilmedi'))].filter(Boolean);
+    const uniqueSizes = ['Hepsi', ...new Set(productStats.map(p => p.size || 'Belirtilmedi'))].filter(Boolean);
+
+    filteredProductStats.forEach(p => {
+       const mat = p.material || 'Belirtilmedi';
+       const mod = p.model || 'Belirtilmedi';
+       const sz = p.size || 'Belirtilmedi';
+       const stock = (p.platforms ? p.platforms.reduce((sum: number, s: any) => sum + (s.stock || 0), 0) : 0);
+
+       const comboKey = `${mat}---${mod}---${sz}`;
+       if (!combos[comboKey]) combos[comboKey] = { key: comboKey, material: mat, model: mod, size: sz, soldQty: 0, revenue: 0, profit: 0, stock: 0 };
+       combos[comboKey].soldQty += p.soldQty;
+       combos[comboKey].revenue += p.revenue;
+       combos[comboKey].profit += p.profit;
+       combos[comboKey].stock += stock;
+
+       if (!sizeTrends[sz]) sizeTrends[sz] = { size: sz, soldQty: 0, revenue: 0, stock: 0 };
+       sizeTrends[sz].soldQty += p.soldQty;
+       sizeTrends[sz].revenue += p.revenue;
+       sizeTrends[sz].stock += stock;
+
+       const matModKey = `${mat}---${mod}`;
+       if (!materialModelTrends[matModKey]) materialModelTrends[matModKey] = { material: mat, model: mod, soldQty: 0, revenue: 0, stock: 0 };
+       materialModelTrends[matModKey].soldQty += p.soldQty;
+       materialModelTrends[matModKey].revenue += p.revenue;
+       materialModelTrends[matModKey].stock += stock;
+
+       const matSzKey = `${mat}---${sz}`;
+       if (!materialSizeTrends[matSzKey]) materialSizeTrends[matSzKey] = { material: mat, size: sz, soldQty: 0, revenue: 0, stock: 0 };
+       materialSizeTrends[matSzKey].soldQty += p.soldQty;
+       materialSizeTrends[matSzKey].revenue += p.revenue;
+       materialSizeTrends[matSzKey].stock += stock;
+    });
+
+    const comboList = Object.values(combos).sort((a,b) => b.soldQty - a.soldQty);
+    const sizeList = Object.values(sizeTrends).sort((a,b) => b.soldQty - a.soldQty);
+    const matModList = Object.values(materialModelTrends).sort((a,b) => b.soldQty - a.soldQty);
+    const matSzList = Object.values(materialSizeTrends).sort((a,b) => b.soldQty - a.soldQty);
+
+    const lowDemand = comboList.filter(c => c.stock > 0).sort((a,b) => {
+        const aRatio = a.soldQty / a.stock;
+        const bRatio = b.soldQty / b.stock;
+        if (aRatio === bRatio) return b.stock - a.stock;
+        return aRatio - bRatio;
+    });
+
+    return { comboList, sizeList, matModList, matSzList, lowDemand, uniqueMaterials, uniqueModels, uniqueSizes };
+  }, [productStats, matrixFilterMaterial, matrixFilterModel, matrixFilterSize]);
 
   // --- RİSK ANALİZİ (Risk Analysis) ---
   const riskStats = useMemo(() => {
@@ -292,6 +367,7 @@ export default function Analytics({ settings, initialTab }: { settings: Settings
            { id: 'products', label: 'Ürün Analizi', icon: Package },
            { id: 'models', label: 'Model Analizi', icon: Layers },
            { id: 'materials', label: 'Materyal Analizi', icon: Layers },
+           { id: 'matrix', label: 'Matris & Sipariş Analizi', icon: Network },
            { id: 'platform', label: 'Platform Analizi', icon: Layers },
            { id: 'cashflow', label: 'Nakit Akışı', icon: Banknote },
            { id: 'risk', label: 'Risk Analizi', icon: AlertTriangle }
@@ -496,6 +572,200 @@ export default function Analytics({ settings, initialTab }: { settings: Settings
                     ))}
                   </tbody>
                </table>
+             </div>
+           </div>
+        </div>
+      )}
+
+      {activeTab === 'matrix' && (
+        <div className="space-y-6 animate-in slide-in-from-bottom-2">
+           <div className="card p-6 border-blue-200 border-2 bg-blue-50/20">
+             <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-lg text-blue-900 flex items-center gap-2"><Network className="w-5 h-5 text-blue-600" /> Katalog Çapraz Analizi & Yeni Sipariş Önerileri</h3>
+                <span className="text-xs font-bold text-blue-700 bg-blue-100 px-3 py-1 rounded-full">{advancedAnalysis.comboList.length} Kombinasyon Algılandı</span>
+             </div>
+             <p className="text-sm text-blue-800 mb-6 font-medium">Bu matrix, materyal, model ve ölçü bazlı en çok talep gören ve en düşük stok devir hızına sahip olan özellikleri çaprazlayarak sonraki döküm ve ithalat siparişlerinizde karar vermenize yardımcı olur.</p>
+             
+             <div className="flex flex-wrap gap-4 mb-6 p-4 bg-white rounded-xl border border-blue-100 shadow-sm">
+                <div className="flex-1 min-w-[200px]">
+                   <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Materyal</label>
+                   <select value={matrixFilterMaterial} onChange={e => setMatrixFilterMaterial(e.target.value)} className="w-full text-sm font-bold bg-gray-50 border-gray-200 rounded-lg px-3 py-2">
+                      {advancedAnalysis.uniqueMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+                   </select>
+                </div>
+                <div className="flex-1 min-w-[200px]">
+                   <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Model</label>
+                   <select value={matrixFilterModel} onChange={e => setMatrixFilterModel(e.target.value)} className="w-full text-sm font-bold bg-gray-50 border-gray-200 rounded-lg px-3 py-2">
+                      {advancedAnalysis.uniqueModels.map(m => <option key={m} value={m}>{m}</option>)}
+                   </select>
+                </div>
+                <div className="flex-1 min-w-[200px]">
+                   <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Ölçü</label>
+                   <select value={matrixFilterSize} onChange={e => setMatrixFilterSize(e.target.value)} className="w-full text-sm font-bold bg-gray-50 border-gray-200 rounded-lg px-3 py-2">
+                      {advancedAnalysis.uniqueSizes.map(s => <option key={s} value={s}>{s}</option>)}
+                   </select>
+                </div>
+             </div>
+
+             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                 {/* Top Combinations */}
+                 <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                    <h4 className="font-black text-gray-900 mb-4 flex items-center gap-2">🔥 En Çok Satan Kombinasyonlar</h4>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm whitespace-nowrap">
+                            <thead>
+                                <tr className="text-gray-500 border-b border-gray-100">
+                                   <th className="py-2">Materyal</th>
+                                   <th className="py-2">Model</th>
+                                   <th className="py-2">Ölçü</th>
+                                   <th className="py-2 text-right">Satış (Adet)</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                                {advancedAnalysis.comboList.slice(0, 10).map(c => (
+                                    <tr key={c.key} className="hover:bg-gray-50">
+                                        <td className="py-2.5 font-bold text-gray-800">{c.material}</td>
+                                        <td className="py-2.5 text-gray-600">{c.model}</td>
+                                        <td className="py-2.5 font-mono text-xs text-gray-500">{c.size}</td>
+                                        <td className="py-2.5 text-right font-black text-primary">{c.soldQty}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                 </div>
+
+                 {/* Dead/Low Demand Stock */}
+                 <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                    <h4 className="font-black text-gray-900 mb-4 flex items-center gap-2">⚠️ Yavaş Giden veya Talep Görmeyenler</h4>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm whitespace-nowrap">
+                            <thead>
+                                <tr className="text-gray-500 border-b border-gray-100">
+                                   <th className="py-2">Materyal / Model</th>
+                                   <th className="py-2 text-center">Ölçü</th>
+                                   <th className="py-2 text-right">Mevcut Stok</th>
+                                   <th className="py-2 text-right">Satış (Adet)</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                                {advancedAnalysis.lowDemand.slice(0, 10).map(c => (
+                                    <tr key={c.key} className="hover:bg-gray-50">
+                                        <td className="py-2.5 font-bold text-gray-800">{c.material} <span className="font-normal text-gray-500">- {c.model}</span></td>
+                                        <td className="py-2.5 font-mono text-center text-xs text-gray-500">{c.size}</td>
+                                        <td className="py-2.5 text-right font-black text-red-500">{c.stock}</td>
+                                        <td className="py-2.5 text-right font-black text-gray-600">{c.soldQty}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                 </div>
+                 
+                 {/* Cross Matrix - Material x Model */}
+                 <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 xl:col-span-2">
+                     <h4 className="font-black text-gray-900 mb-4 flex items-center gap-2"><Filter className="w-4 h-4 text-gray-500" /> Materyal × Model Performansı</h4>
+                     <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm whitespace-nowrap">
+                            <thead>
+                                <tr className="text-gray-500 border-b border-gray-100">
+                                   <th className="py-2">Materyal</th>
+                                   <th className="py-2">Model</th>
+                                   <th className="py-2 text-right">Satış (Adet)</th>
+                                   <th className="py-2 text-right">Mevcut Stok</th>
+                                   <th className="py-2 text-right">Stok Erim Hızı</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                                {advancedAnalysis.matModList.map((m, idx) => {
+                                   const velocity = m.stock > 0 ? ((m.soldQty / m.stock) * 100).toFixed(1) : (m.soldQty > 0 ? '>100' : '0');
+                                   return (
+                                     <tr key={`${m.material}-${m.model}-${idx}`} className="hover:bg-gray-50">
+                                         <td className="py-3 font-bold text-gray-900">{m.material}</td>
+                                         <td className="py-3 font-medium text-gray-700">{m.model}</td>
+                                         <td className="py-3 text-right font-black text-primary">{m.soldQty}</td>
+                                         <td className="py-3 text-right font-black text-gray-600">{m.stock}</td>
+                                         <td className="py-3 text-right">
+                                            <span className={cn("px-2 py-1 rounded-lg text-xs font-bold", 
+                                               m.soldQty > m.stock ? "bg-red-100 text-red-700" :
+                                               (parseFloat(velocity) > 50 ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700")
+                                            )}>
+                                               {m.soldQty > m.stock ? "Yetersiz Stok!" : `%${velocity}`}
+                                            </span>
+                                         </td>
+                                     </tr>
+                                   );
+                                })}
+                            </tbody>
+                        </table>
+                     </div>
+                 </div>
+
+                 {/* Cross Matrix - Material x Size */}
+                 <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 xl:col-span-2">
+                     <h4 className="font-black text-gray-900 mb-4 flex items-center gap-2"><Filter className="w-4 h-4 text-gray-500" /> Materyal × Ölçü Talebi (Hangi ölçü hangi materyalde daha çok isteniyor?)</h4>
+                     <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm whitespace-nowrap">
+                            <thead>
+                                <tr className="text-gray-500 border-b border-gray-100">
+                                   <th className="py-2">Materyal</th>
+                                   <th className="py-2">Ölçü</th>
+                                   <th className="py-2 text-right">Satış (Adet)</th>
+                                   <th className="py-2 text-right">Mevcut Stok</th>
+                                   <th className="py-2 text-right">Talep / Stok Oranı</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                                {advancedAnalysis.matSzList.map((m, idx) => {
+                                   const velocity = m.stock > 0 ? ((m.soldQty / m.stock) * 100).toFixed(1) : (m.soldQty > 0 ? '>100' : '0');
+                                   return (
+                                     <tr key={`${m.material}-${m.size}-${idx}`} className="hover:bg-gray-50">
+                                         <td className="py-3 font-bold text-gray-900">{m.material}</td>
+                                         <td className="py-3 font-mono text-gray-600">{m.size}</td>
+                                         <td className="py-3 text-right font-black text-blue-600">{m.soldQty}</td>
+                                         <td className="py-3 text-right font-black text-gray-600">{m.stock}</td>
+                                         <td className="py-3 text-right">
+                                            <span className={cn("px-2 py-1 rounded-lg text-xs font-bold", 
+                                               m.soldQty > m.stock ? "bg-red-100 text-red-700" :
+                                               (parseFloat(velocity) > 50 ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700")
+                                            )}>
+                                               {m.soldQty > m.stock ? "Yetersiz Stok!" : `%${velocity}`}
+                                            </span>
+                                         </td>
+                                     </tr>
+                                   );
+                                })}
+                            </tbody>
+                        </table>
+                     </div>
+                 </div>
+                 
+                 {/* Top Sizes Regardless of Material */}
+                 <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 xl:col-span-2">
+                     <h4 className="font-black text-gray-900 mb-4 flex items-center gap-2"><Filter className="w-4 h-4 text-gray-500" /> Genel Ölçü Trendleri (Materyal Bağımsız)</h4>
+                     <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm whitespace-nowrap">
+                            <thead>
+                                <tr className="text-gray-500 border-b border-gray-100">
+                                   <th className="py-2">Ölçü</th>
+                                   <th className="py-2 text-right">Satış (Adet)</th>
+                                   <th className="py-2 text-right">Mevcut Stok</th>
+                                   <th className="py-2 text-right">Ciro</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                                {advancedAnalysis.sizeList.map((s, idx) => (
+                                     <tr key={`${s.size}-${idx}`} className="hover:bg-gray-50">
+                                         <td className="py-3 font-mono text-gray-900">{s.size}</td>
+                                         <td className="py-3 text-right font-black text-gray-800">{s.soldQty}</td>
+                                         <td className="py-3 text-right font-bold text-gray-500">{s.stock}</td>
+                                         <td className="py-3 text-right font-bold text-green-600"><FormatAmount amount={s.revenue} /></td>
+                                     </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                     </div>
+                 </div>
              </div>
            </div>
         </div>
