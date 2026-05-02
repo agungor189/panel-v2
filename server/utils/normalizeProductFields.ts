@@ -37,12 +37,54 @@ export function normalizeSize(size: string | null | undefined): string | null {
   return size.trim();
 }
 
+export function normalizePipeSize(size: string | null | undefined): string {
+  if (!size) return 'Bilinmiyor';
+  let s = size.trim().toLowerCase();
+  if (!s) return 'Bilinmiyor';
+
+  // Kare profil ölçüleri (örn: 20x20, 25*25, 30 x 30, 40X40)
+  const squareMatch = s.match(/^(\d+)\s*[xX*]\s*(\d+)/);
+  if (squareMatch) {
+    return `${squareMatch[1]}x${squareMatch[2]} mm`;
+  }
+
+  // İnç ölçüler (örn: 1/2, 1/2", 1/2 inch, 1 1/4, 1-1/2)
+  if (s.includes('/')) {
+    s = s.replace(/["“”\s]*(?:inch|inç|inc)?[\s]*$/i, '').trim();
+    // Handling "1 1/4" or "1-1/4"
+    if (s.includes(' ') || s.includes('-')) {
+       const parts = s.split(/[\s-]+/);
+       if (parts.length > 1 && parts[parts.length - 1].includes('/')) {
+          let pre = parts.slice(0, -1).join('-');
+          return `${pre}-${parts[parts.length - 1]} inch`;
+       }
+    }
+    return `${s} inch`;
+  }
+  
+  // Tam inç ölçüler (örn: 1", 2 inch) but no fraction
+  const inchMatch = s.match(/^(\d+)\s*(?:"|inch|inç|inc)$/i);
+  if (inchMatch) {
+    return `${inchMatch[1]} inch`;
+  }
+
+  // Yuvarlak milimetre ölçüleri (örn: 20, 20 mm, 20mm, Ø20, çap 20)
+  const mmMatch = s.match(/(?:ø|çap|cap)?\s*(\d+)\s*(?:mm)?$/i);
+  if (mmMatch) {
+    return `${mmMatch[1]} mm`;
+  }
+
+  return s;
+}
+
 export function generateNormalizedFields(product: any) {
+  const pipe_size_raw = product.pipe_size || product.size;
   return {
     normalized_material: normalizeMaterial(product.material) || 'Bilinmiyor',
     normalized_model: normalizeModel(product.model) || 'Bilinmiyor',
     normalized_size: normalizeSize(product.size) || 'Bilinmiyor',
     normalized_tube_type: product.category?.toLowerCase().includes('kare') || product.name?.toLowerCase().includes('kare') ? 'Kare' : 
-                          (product.category?.toLowerCase().includes('yuvarlak') || product.name?.toLowerCase().includes('yuvarlak') ? 'Yuvarlak' : 'Bilinmiyor')
+                          (product.category?.toLowerCase().includes('yuvarlak') || product.name?.toLowerCase().includes('yuvarlak') ? 'Yuvarlak' : 'Bilinmiyor'),
+    normalized_pipe_size: normalizePipeSize(pipe_size_raw)
   };
 }

@@ -203,9 +203,10 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6 py-6 border-y border-border-color">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-6 py-6 border-y border-border-color">
                 <DetailStat label="Satış Fiyatı" value={<FormatAmount amount={product.sale_price} />} color="text-primary font-black" />
                 <DetailStat label="Ağırlık" value={`${product.weight} gr`} color="text-text-muted" />
+                <DetailStat label="Boru Ölçüsü" value={product.pipe_size || 'Bilinmiyor'} color="text-text-muted font-mono text-sm" />
                 <DetailStat label="Alış ($)" value={`$${product.purchase_price_usd.toFixed(2)}`} color="text-text-muted" subLabel={`₺${product.exchange_rate_used} kur ile`} />
                 <DetailStat label="Maliyet (₺)" value={<FormatAmount amount={product.purchase_cost} />} color="text-text-muted" />
                 <DetailStat 

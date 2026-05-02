@@ -87,7 +87,8 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
     description: 'Açıklama',
     weight: 'Ağırlık',
     location: 'Lokasyon',
-    notes: 'Notlar'
+    notes: 'Notlar',
+    pipe_size: 'Boru Ölçüsü'
   });
 
   const exportToCsv = () => {
@@ -96,6 +97,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
       'Ürün Kodu': p.sku,
       'Malzeme': p.category,
       'Ürün Adı': p.name || p.title,
+      'Boru Ölçüsü': p.pipe_size || '',
       'Toplam Stok': p.total_stock || 0,
       'Satış Fiyatı': p.sale_price,
       'Barkod': p.barcode || '',
@@ -147,6 +149,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
         newMapping.weight = findMatch(['ağırlık', 'weight', 'gram']) || headers[7] || '';
         newMapping.location = findMatch(['lokasyon', 'konum', 'location', 'raf']) || headers[8] || '';
         newMapping.notes = findMatch(['not', 'notes', 'bilgi']) || headers[9] || '';
+        newMapping.pipe_size = findMatch(['boru ölçüsü', 'boru olcusu', 'ölçü', 'olcu', 'size', 'pipe size', 'diameter', 'çap', 'cap', 'nominal size', 'nominal bore', 'outside diameter', 'tube size', 'profil ölçüsü', 'profil olcusu']) || '';
 
         setMapping(newMapping);
         setShowMappingModal(true);
@@ -189,6 +192,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
         const weight = parseInt(row[mapping.weight]) || 0;
         const location = row[mapping.location] || '';
         const notes = row[mapping.notes] || '';
+        const pipe_size = row[mapping.pipe_size] || '';
 
         await api.post('/products', {
           name: name,
@@ -196,6 +200,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
           sku: sku,
           barcode: barcode,
           category: category,
+          pipe_size: pipe_size,
           description: description,
           notes: notes,
           warehouse_location: location,
@@ -562,9 +567,16 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
                       </div>
                     </td>
                     <td className="px-4 py-4 hidden xl:table-cell">
-                      <span className="inline-block whitespace-normal break-words text-[10px] font-bold text-text-muted uppercase tracking-widest bg-bg-main px-2 py-1 rounded border border-border-color max-w-[150px]">
-                        {p.category}
-                      </span>
+                      <div className="flex flex-col gap-1 items-start">
+                        <span className="inline-block whitespace-normal break-words text-[10px] font-bold text-text-muted uppercase tracking-widest bg-bg-main px-2 py-1 rounded border border-border-color max-w-[150px]">
+                          {p.category}
+                        </span>
+                        {p.pipe_size && p.pipe_size !== 'Bilinmiyor' && (
+                          <span className="inline-block whitespace-normal break-words text-[10px] font-bold text-primary bg-blue-50 px-2 py-1 rounded border border-blue-100 max-w-[150px]">
+                            Ölçü: {p.pipe_size}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-4 hidden md:table-cell text-sm font-medium text-gray-500 text-right">
                       ${(p.purchase_price_usd || 0).toFixed(2)}
@@ -657,6 +669,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
                           {field === 'weight' && 'Ağırlık (Gram)'}
                           {field === 'location' && 'Raf Lokasyonu'}
                           {field === 'notes' && 'Dahili Notlar'}
+                          {field === 'pipe_size' && 'Boru Ölçüsü (Önerilen)'}
                         </label>
                         <div className="relative">
                            <select 

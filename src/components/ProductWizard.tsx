@@ -37,6 +37,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
     barcode: '',
     category: '',
     model: 'Standart',
+    pipe_size: '',
     description: '',
     purchase_price_usd: 0,
     purchase_cost: 0,
@@ -311,6 +312,15 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
                     onChange={handleInputChange} 
                     placeholder="Örn: Standart, XL, M vb."
                     className="form-input" 
+                 />
+              </Field>
+              <Field label="Boru Ölçüsü">
+                 <input 
+                    name="pipe_size" 
+                    value={formData.pipe_size} 
+                    onChange={handleInputChange} 
+                    placeholder="Örn: 20 mm, 1/2 inç vb."
+                    className="form-input font-bold" 
                  />
               </Field>
               <div className="md:col-span-2">
