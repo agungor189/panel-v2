@@ -2,9 +2,17 @@ import React, { useState } from 'react';
 import { Plus, ShoppingCart } from 'lucide-react';
 import SalesList from './SalesList';
 import SalesForm from './SalesForm';
+import SaleDetailModal from './SaleDetailModal';
 
 export default function Sales() {
   const [showForm, setShowForm] = useState(false);
+  const [selectedSale, setSelectedSale] = useState<any>(null);
+
+  const handleSaleUpdated = () => {
+    // Optionally trigger a reload in SalesList if needed.
+    // For now we just close the modal which remounts SalesList and fetches fresh data
+    setSelectedSale(null);
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in">
@@ -29,7 +37,14 @@ export default function Sales() {
             </button>
           </div>
 
-          <SalesList />
+          <SalesList onSaleClick={setSelectedSale} />
+          {selectedSale && (
+            <SaleDetailModal 
+              sale={selectedSale} 
+              onClose={() => setSelectedSale(null)} 
+              onUpdated={handleSaleUpdated}
+            />
+          )}
         </>
       ) : (
         <SalesForm onBack={() => setShowForm(false)} />

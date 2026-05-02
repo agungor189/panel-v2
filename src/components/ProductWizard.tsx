@@ -44,6 +44,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
     exchange_rate_used: settings?.usd_exchange_rate || 0,
     price_locked: false,
     weight: 0,
+    min_stock_level: 50,
     status: 'Active',
     notes: '',
     platforms: PLATFORMS.map(name => ({ name, stock: 0, price: 0, is_listed: true }))
@@ -251,6 +252,16 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
                   className="form-input font-bold" 
                 />
               </Field>
+              <Field label="Kritik Stok Seviyesi">
+                <input 
+                  type="number"
+                  name="min_stock_level" 
+                  value={formData.min_stock_level} 
+                  onChange={(e) => setFormData({...formData, min_stock_level: parseInt(e.target.value) || 0})}
+                  placeholder="Örn: 50"
+                  className="form-input font-bold" 
+                />
+              </Field>
               <Field label="Stok Adeti" required>
                 <input 
                   type="number"
@@ -282,7 +293,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
                        type="button"
                        onClick={() => setFormData((prev: any) => ({ ...prev, category: c }))}
                        className={cn(
-                         "whitespace-nowrap px-4 py-2 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all",
+                         "whitespace-normal text-left break-words px-4 py-2 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all",
                          formData.category === c ? "bg-primary border-primary text-white shadow-lg" : "bg-white border-border-color text-text-muted hover:bg-bg-main"
                        )}
                      >

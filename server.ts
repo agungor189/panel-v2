@@ -363,7 +363,8 @@ try { db.exec("ALTER TABLE products ADD COLUMN size TEXT"); } catch(e) {}
 try { db.exec("ALTER TABLE products ADD COLUMN connection_type TEXT"); } catch(e) {}
 try { db.exec("ALTER TABLE products ADD COLUMN usage_area TEXT"); } catch(e) {}
 try { db.exec("ALTER TABLE products ADD COLUMN supplier TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE products ADD COLUMN min_stock_level INTEGER DEFAULT 5"); } catch(e) {}
+try { db.exec("ALTER TABLE products ADD COLUMN min_stock_level INTEGER DEFAULT 50"); } catch(e) {}
+try { db.exec("UPDATE products SET min_stock_level = 50 WHERE min_stock_level = 5 OR min_stock_level = 0 OR min_stock_level IS NULL"); } catch(e) {}
 
 try { db.exec("ALTER TABLE sale_items ADD COLUMN unit_price REAL DEFAULT 0"); } catch(e) {}
 try { db.exec("ALTER TABLE sale_items ADD COLUMN purchase_cost REAL DEFAULT 0"); } catch(e) {}
@@ -893,7 +894,7 @@ async function startServer() {
           (SELECT path FROM product_images WHERE product_id = p.id ORDER BY sort_order ASC LIMIT 1) as cover_image,
           COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) as total_stock
         FROM products p
-        WHERE COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) <= COALESCE(p.min_stock_level, 0)
+        WHERE COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) <= COALESCE(NULLIF(p.min_stock_level, 0), CAST((SELECT value FROM settings WHERE key = 'low_stock_threshold') AS INTEGER), 50)
         AND p.status = 'Active'
         ORDER BY total_stock ASC
       `).all() as any[];
@@ -1035,7 +1036,7 @@ async function startServer() {
       insertProduct.run(
         id, name, title, warehouse_location, sku || `SKU-${Date.now()}`, barcode, category, model, description, 
         purchase_price_usd || 0, purchase_cost || 0, sale_price || 0, buffer_percentage || 0, profit_percentage || 0, exchange_rate_used || 0, price_locked ? 1 : 0, 
-        weight || 0, status, notes, material, size, connection_type, usage_area, supplier, min_stock_level || 0
+        weight || 0, status, notes, material, size, connection_type, usage_area, supplier, min_stock_level !== undefined ? min_stock_level : 50
       );
       
       const insertPlatform = db.prepare(`
@@ -1116,7 +1117,7 @@ async function startServer() {
       `).run(
         name, title, warehouse_location, sku, barcode, category, model, description, 
         purchase_price_usd || 0, purchase_cost || 0, sale_price || 0, buffer_percentage || 0, profit_percentage || 0, exchange_rate_used || 0, price_locked ? 1 : 0,
-        weight || 0, status, notes, material, size, connection_type, usage_area, supplier, min_stock_level || 0, req.params.id
+        weight || 0, status, notes, material, size, connection_type, usage_area, supplier, min_stock_level !== undefined ? min_stock_level : 50, req.params.id
       );
 
       db.prepare("DELETE FROM product_platforms WHERE product_id = ?").run(req.params.id);
@@ -1992,6 +1993,28 @@ async function startServer() {
       res.json(sales);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/sales/:id", (req, res) => {
+    try {
+      const { 
+        customer_name, customer_phone, customer_address, 
+        shipping_company, tracking_number, status
+      } = req.body;
+      
+      db.prepare(`
+        UPDATE sales SET 
+          customer_name=?, customer_phone=?, customer_address=?, 
+          shipping_company=?, tracking_number=?, status=?, updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+      `).run(
+        customer_name, customer_phone, customer_address, 
+        shipping_company, tracking_number, status, req.params.id
+      );
+      res.json({ success: true, message: "Satış güncellendi" });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
     }
   });
 

@@ -9,7 +9,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export default function SalesList() {
+export default function SalesList({ onSaleClick }: { onSaleClick?: (sale: any) => void }) {
   const { FormatAmount } = useCurrency();
   const [sales, setSales] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,6 +44,7 @@ export default function SalesList() {
               <th className="px-6 py-4 text-center">Platform</th>
               <th className="px-6 py-4 text-center">Net Kar</th>
               <th className="px-6 py-4 text-center">Toplam Adet</th>
+              <th className="px-6 py-4 text-center">Ağırlık</th>
               <th className="px-6 py-4 text-center">Toplam Tutar</th>
               <th className="px-6 py-4">Tarih</th>
               <th className="px-6 py-4">Durum</th>
@@ -51,7 +52,11 @@ export default function SalesList() {
           </thead>
           <tbody className="divide-y divide-border-color">
             {sales.map((sale) => (
-              <tr key={sale.id} className="hover:bg-bg-main/50 transition-colors">
+              <tr 
+                key={sale.id} 
+                onClick={() => onSaleClick && onSaleClick(sale)}
+                className="hover:bg-bg-main/50 transition-colors cursor-pointer"
+              >
                 <td className="px-6 py-4">
                   <div className="font-bold text-text-main flex items-center gap-2">
                     <User className="w-4 h-4 text-primary" /> {sale.customer_name}
@@ -77,6 +82,9 @@ export default function SalesList() {
                 </td>
                 <td className="px-6 py-4 text-center font-bold text-gray-800">
                   {sale.total_quantity}
+                </td>
+                <td className="px-6 py-4 text-center text-xs text-text-muted font-bold">
+                  {sale.total_weight ? `${sale.total_weight} gr` : '-'}
                 </td>
                 <td className="px-6 py-4 text-center">
                   <span className="font-bold text-primary bg-primary/10 px-3 py-1 rounded-lg">

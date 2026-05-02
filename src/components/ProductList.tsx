@@ -519,6 +519,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
             <table className="w-full text-left min-w-[1000px]">
               <thead>
                 <tr className="bg-bg-main text-[10px] uppercase tracking-widest text-text-muted font-extrabold border-b border-border-color">
+                  <th className="px-4 py-5 w-12 text-center text-text-muted">#</th>
                   <th className="px-4 py-5">Ürün</th>
                   <th className="px-4 py-5 hidden xl:table-cell">Kategori</th>
                   <th className="px-4 py-5 hidden md:table-cell text-right">Alış USD</th>
@@ -531,7 +532,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-color">
-                {filteredProducts.map((p) => {
+                {filteredProducts.map((p, index) => {
                   const margin = p.sale_price && p.purchase_price_usd && p.exchange_rate_used 
                     ? ((p.sale_price - (p.purchase_price_usd * p.exchange_rate_used)) / p.sale_price) * 100 
                     : 0;
@@ -540,6 +541,9 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
                   
                   return (
                   <tr key={p.id} onClick={() => onProductClick(p.id)} className="hover:bg-bg-main cursor-pointer group transition-colors">
+                    <td className="px-4 py-4 text-center text-xs font-bold text-text-muted/60">
+                      {index + 1}
+                    </td>
                     <td className="px-4 py-4">
                       <div className="flex items-center space-x-3">
                         <div className="w-10 h-10 rounded-lg bg-bg-main border border-border-color overflow-hidden p-1 flex items-center justify-center shrink-0">
@@ -558,7 +562,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
                       </div>
                     </td>
                     <td className="px-4 py-4 hidden xl:table-cell">
-                      <span className="inline-block whitespace-nowrap text-[10px] font-bold text-text-muted uppercase tracking-widest bg-bg-main px-2 py-1 rounded border border-border-color truncate max-w-[100px]">
+                      <span className="inline-block whitespace-normal break-words text-[10px] font-bold text-text-muted uppercase tracking-widest bg-bg-main px-2 py-1 rounded border border-border-color max-w-[150px]">
                         {p.category}
                       </span>
                     </td>
@@ -596,7 +600,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
               </tbody>
               <tfoot className="bg-blue-50/50 border-t-2 border-blue-100">
                 <tr>
-                  <td className="px-4 py-4 text-right font-bold text-gray-700">Genel Toplam:</td>
+                  <td colSpan={2} className="px-4 py-4 text-right font-bold text-gray-700">Genel Toplam:</td>
                   <td className="px-4 py-4 hidden xl:table-cell"></td>
                   <td className="px-4 py-4 hidden md:table-cell"></td>
                   <td className="px-4 py-4 hidden lg:table-cell"></td>
