@@ -90,14 +90,57 @@ export interface ExpenseAttachment {
   uploaded_at: string;
 }
 
-export interface RecurringPayment {
+export interface RecurringPaymentPlan {
   id: string;
   title: string;
-  day_of_month: number;
-  amount: number;
+  description?: string;
   category: string;
-  note: string;
-  status: 'Active' | 'Paused';
+  payment_type: string;
+  amount: number;
+  currency: string;
+  amount_try?: number;
+  exchange_rate?: number;
+  due_day?: number;
+  due_month?: number;
+  start_month?: number;
+  week_day?: number;
+  custom_interval_days?: number;
+  frequency: string;
+  start_date?: string;
+  end_date?: string;
+  next_due_date?: string;
+  last_processed_date?: string;
+  auto_process: boolean;
+  is_active: boolean;
+  payment_account_id?: string;
+  expense_category_id?: string;
+  tax_type?: string;
+  related_party?: string;
+  document_required: boolean;
+  notes?: string;
+}
+
+export interface RecurringPaymentOccurrence {
+  id: string;
+  recurring_payment_id: string;
+  due_date: string;
+  amount: number;
+  currency: string;
+  exchange_rate?: number;
+  amount_try?: number;
+  status: 'pending' | 'due' | 'overdue' | 'processed' | 'skipped' | 'cancelled';
+  processed_at?: string;
+  expense_id?: string;
+  transaction_id?: string;
+  processed_by?: string;
+  notes?: string;
+
+  // Joined from plan
+  plan_title?: string;
+  plan_category?: string;
+  plan_auto_process?: boolean;
+  plan_payment_type?: string;
+  plan_frequency?: string;
 }
 
 export interface DashboardMetrics {

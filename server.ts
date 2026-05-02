@@ -16,6 +16,8 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { createProductAnalyticsRouter } from "./server/routes/productAnalyticsRoutes.js";
+import { createRecurringPaymentsRouter } from "./server/routes/recurringPaymentsRoutes.js";
+import { createDashboardDataRouter } from "./server/routes/dashboardDataRoutes.js";
 import { generateNormalizedFields } from "./server/utils/normalizeProductFields.js";
 
 declare global {
@@ -247,15 +249,55 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
-  CREATE TABLE IF NOT EXISTS recurring_payments (
+  CREATE TABLE IF NOT EXISTS recurring_payment_plans (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
-    day_of_month INTEGER NOT NULL,
-    amount REAL NOT NULL,
+    description TEXT,
     category TEXT,
-    note TEXT,
-    status TEXT DEFAULT 'Active',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    payment_type TEXT,
+    amount REAL,
+    currency TEXT,
+    amount_try REAL,
+    exchange_rate REAL,
+    due_day INTEGER,
+    due_month INTEGER,
+    start_month INTEGER,
+    week_day INTEGER,
+    custom_interval_days INTEGER,
+    frequency TEXT,
+    start_date TEXT,
+    end_date TEXT,
+    next_due_date TEXT,
+    last_processed_date TEXT,
+    auto_process BOOLEAN DEFAULT 0,
+    is_active BOOLEAN DEFAULT 1,
+    payment_account_id TEXT,
+    expense_category_id TEXT,
+    tax_type TEXT,
+    related_party TEXT,
+    document_required BOOLEAN DEFAULT 0,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS recurring_payment_occurrences (
+    id TEXT PRIMARY KEY,
+    recurring_payment_id TEXT,
+    due_date TEXT,
+    amount REAL,
+    currency TEXT,
+    exchange_rate REAL,
+    amount_try REAL,
+    status TEXT,
+    processed_at DATETIME,
+    expense_id TEXT,
+    transaction_id TEXT,
+    processed_by TEXT,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(recurring_payment_id, due_date)
   );
 
   CREATE TABLE IF NOT EXISTS api_keys (
@@ -281,7 +323,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_transactions_type_date ON transactions(type, date);
   CREATE INDEX IF NOT EXISTS idx_transactions_platform ON transactions(platform);
   CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
-  CREATE INDEX IF NOT EXISTS idx_recurring_payments_status ON recurring_payments(status);
+  CREATE INDEX IF NOT EXISTS idx_recurring_plans_status ON recurring_payment_plans(is_active);
+  CREATE INDEX IF NOT EXISTS idx_recurring_occurrences_status ON recurring_payment_occurrences(status);
   CREATE INDEX IF NOT EXISTS idx_product_platforms_product_id ON product_platforms(product_id);
   CREATE INDEX IF NOT EXISTS idx_product_images_product_id ON product_images(product_id);
 
@@ -406,6 +449,9 @@ try { db.exec("ALTER TABLE products ADD COLUMN material TEXT"); } catch(e) {}
 try { db.exec("ALTER TABLE products ADD COLUMN size TEXT"); } catch(e) {}
 try { db.exec("ALTER TABLE products ADD COLUMN connection_type TEXT"); } catch(e) {}
 try { db.exec("ALTER TABLE products ADD COLUMN usage_area TEXT"); } catch(e) {}
+try { db.exec("ALTER TABLE recurring_payment_plans ADD COLUMN start_month INTEGER"); } catch(e) {}
+try { db.exec("ALTER TABLE recurring_payment_plans ADD COLUMN week_day INTEGER"); } catch(e) {}
+try { db.exec("ALTER TABLE recurring_payment_plans ADD COLUMN custom_interval_days INTEGER"); } catch(e) {}
 try { db.exec("ALTER TABLE products ADD COLUMN supplier TEXT"); } catch(e) {}
 try { db.exec("ALTER TABLE products ADD COLUMN min_stock_level INTEGER DEFAULT 50"); } catch(e) {}
 try { db.exec("UPDATE products SET min_stock_level = 50 WHERE min_stock_level = 5 OR min_stock_level = 0 OR min_stock_level IS NULL"); } catch(e) {}
@@ -506,15 +552,17 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS dashboard_widgets (
     id TEXT PRIMARY KEY,
     user_id TEXT DEFAULT 'admin',
+    widget_key TEXT NOT NULL,
+    title TEXT,
+    description TEXT,
     widget_type TEXT NOT NULL,
-    data_source TEXT,
-    position_x INTEGER DEFAULT 0,
-    position_y INTEGER DEFAULT 0,
-    width INTEGER DEFAULT 1,
-    height INTEGER DEFAULT 1,
-    priority_level INTEGER DEFAULT 1,
+    source_module TEXT,
+    size TEXT DEFAULT 'small',
+    position INTEGER DEFAULT 0,
     is_visible INTEGER DEFAULT 1,
-    config TEXT DEFAULT '{}'
+    settings_json TEXT DEFAULT '{}',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS users (
@@ -535,29 +583,24 @@ if (countUsers.count === 0) {
 
 const widgetsCount = db.prepare("SELECT COUNT(*) as count FROM dashboard_widgets").get() as any;
 if (widgetsCount.count === 0) {
-  const insertWidget = db.prepare("INSERT INTO dashboard_widgets (id, user_id, widget_type, position_x, position_y, width, height, priority_level, is_visible, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+  const insertWidget = db.prepare("INSERT INTO dashboard_widgets (id, user_id, widget_key, title, description, widget_type, source_module, size, position, is_visible, settings_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
   
-  // Top KPIs (width 4 in a 12 col grid)
-  insertWidget.run(uuidv4(), 'admin', 'total_revenue', 0, 0, 4, 3, 3, 1, '{}');
-  insertWidget.run(uuidv4(), 'admin', 'total_expense', 4, 0, 4, 3, 3, 1, '{}');
-  insertWidget.run(uuidv4(), 'admin', 'net_profit',   8, 0, 4, 3, 3, 1, '{}');
-  
-  // Row 2
-  insertWidget.run(uuidv4(), 'admin', 'critical_stock', 0, 3, 4, 3, 2, 1, '{}');
-  insertWidget.run(uuidv4(), 'admin', 'total_stock_value', 4, 3, 4, 3, 2, 1, '{}');
-  insertWidget.run(uuidv4(), 'admin', 'total_stock_cost', 8, 3, 4, 3, 2, 1, '{}');
-  
-  // Row 3
-  insertWidget.run(uuidv4(), 'admin', 'est_gross_profit', 0, 6, 4, 3, 2, 1, '{}');
-  insertWidget.run(uuidv4(), 'admin', 'avg_profit_margin', 4, 6, 4, 3, 2, 1, '{}');
+  const defaults = [
+    { key: 'payment_month_pending_count', title: 'Bu Ay Bekleyen İşlem', type: 'kpi', module: 'payments', size: 'small' },
+    { key: 'payment_month_pending_amount', title: 'Bu Ay Bekleyen Tutar', type: 'kpi', module: 'payments', size: 'small' },
+    { key: 'payment_overdue_count', title: 'Geciken Ödeme', type: 'kpi', module: 'payments', size: 'small' },
+    { key: 'product_total_sold', title: 'Toplam Satılan Adet', type: 'kpi', module: 'products', size: 'small' },
+    { key: 'product_total_revenue', title: 'Toplam Satış Geliri', type: 'kpi', module: 'products', size: 'small' },
+    { key: 'product_top_material', title: 'En Çok Satan Materyal', type: 'kpi', module: 'products', size: 'small' },
+    { key: 'product_material_pie', title: 'Materyal Satış Dağılımı', type: 'pie', module: 'products', size: 'medium' },
+    { key: 'sales_revenue_trend', title: 'Satış Trend Grafiği', type: 'line', module: 'products', size: 'large' },
+    { key: 'product_reorder_summar', title: 'Akıllı Sipariş Önerisi', type: 'kpi', module: 'products', size: 'medium' },
+    { key: 'payment_upcoming_list', title: 'Yaklaşan Ödemeler', type: 'list', module: 'payments', size: 'medium' }
+  ];
 
-  // Charts
-  insertWidget.run(uuidv4(), 'admin', 'financial_trend', 0, 9, 6, 7, 3, 1, '{}');
-  insertWidget.run(uuidv4(), 'admin', 'platform_sales', 6, 9, 6, 7, 3, 1, '{}');
-  
-  // Lists
-  insertWidget.run(uuidv4(), 'admin', 'recent_transactions', 0, 16, 6, 8, 2, 1, '{}');
-  insertWidget.run(uuidv4(), 'admin', 'low_stock_list', 6, 16, 6, 8, 2, 1, '{}');
+  defaults.forEach((w, i) => {
+    insertWidget.run(uuidv4(), 'admin', w.key, w.title, '', w.type, w.module, w.size, i, 1, '{}');
+  });
 }
 
 try { db.exec("ALTER TABLE sales ADD COLUMN exchange_rate_at_transaction REAL DEFAULT 1"); } catch(e) {}
@@ -931,8 +974,8 @@ async function startServer() {
   app.get("/api/dashboard/widgets", (req, res) => {
     try {
       const user_id = req.query.user_id || 'admin';
-      const widgets = db.prepare("SELECT * FROM dashboard_widgets WHERE user_id = ?").all(user_id) as any[];
-      const parsedWidgets = widgets.map(w => ({...w, config: JSON.parse(w.config || '{}')}));
+      const widgets = db.prepare("SELECT * FROM dashboard_widgets WHERE user_id = ? ORDER BY position ASC").all(user_id) as any[];
+      const parsedWidgets = widgets.map(w => ({...w, settings_json: JSON.parse(w.settings_json || '{}')}));
       res.json(parsedWidgets);
     } catch(e: any) {
       res.status(500).json({ error: e.message });
@@ -941,11 +984,12 @@ async function startServer() {
 
   app.put("/api/dashboard/widgets", (req, res) => {
     try {
-      const widgets = req.body;
-      const stmt = db.prepare("UPDATE dashboard_widgets SET position_x = ?, position_y = ?, width = ?, height = ?, priority_level = ?, is_visible = ?, config = ? WHERE id = ?");
+      // Expects array of updates
+      const widgets = Array.isArray(req.body) ? req.body : [req.body];
+      const stmt = db.prepare("UPDATE dashboard_widgets SET title = ?, description = ?, size = ?, position = ?, is_visible = ?, settings_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
       const transaction = db.transaction((updates) => {
         for (const w of updates) {
-          stmt.run(w.position_x, w.position_y, w.width, w.height, w.priority_level, w.is_visible, JSON.stringify(w.config || {}), w.id);
+          stmt.run(w.title, w.description, w.size, w.position, w.is_visible, JSON.stringify(w.settings_json || {}), w.id);
         }
       });
       transaction(widgets);
@@ -959,8 +1003,8 @@ async function startServer() {
     try {
       const w = req.body;
       const id = w.id || uuidv4();
-      const insert = db.prepare("INSERT INTO dashboard_widgets (id, user_id, widget_type, data_source, position_x, position_y, width, height, priority_level, is_visible, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-      insert.run(id, w.user_id || 'admin', w.widget_type, w.data_source || null, w.position_x||0, w.position_y||0, w.width||1, w.height||1, w.priority_level||1, w.is_visible!==undefined?w.is_visible:1, JSON.stringify(w.config || {}));
+      const insert = db.prepare("INSERT INTO dashboard_widgets (id, user_id, widget_key, title, description, widget_type, source_module, size, position, is_visible, settings_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      insert.run(id, w.user_id || 'admin', w.widget_key, w.title || '', w.description || '', w.widget_type, w.source_module, w.size || 'small', w.position || 0, w.is_visible !== undefined ? w.is_visible : 1, JSON.stringify(w.settings_json || {}));
       res.json({ id });
     } catch(e: any) {
       res.status(500).json({ error: e.message });
@@ -983,6 +1027,7 @@ async function startServer() {
       const year = now.getFullYear();
       const month = (now.getMonth() + 1).toString().padStart(2, '0');
       const firstDayOfMonth = `${year}-${month}-01T00:00:00Z`;
+      const lastDayOfMonthStr = `${year}-${month}-${new Date(year, now.getMonth() + 1, 0).getDate().toString().padStart(2, '0')}`;
       const currentMonthStr = `${year}-${month}`;
 
       // Metrics (Exclude Cancelled Sales)
@@ -1017,13 +1062,13 @@ async function startServer() {
       const monthlyCashIn = db.prepare("SELECT SUM(amount) as total FROM cash_transactions WHERE type='IN' AND created_at >= ? AND source_type='sale'").get(firstDayOfMonth) as any;
       const monthlyCashOut = db.prepare("SELECT SUM(amount) as total FROM cash_transactions WHERE type='OUT' AND created_at >= ? AND source_type='expense'").get(firstDayOfMonth) as any;
 
-      const activeRecurring = db.prepare("SELECT * FROM recurring_payments WHERE status = 'Active'").all() as any[];
-      let pendingRecurringTotal = 0;
-      for (const r of activeRecurring) {
-         const recurringId = `${r.id}-${year}-${month}`;
-         const exists = db.prepare("SELECT id FROM transactions WHERE recurring_id = ?").get(recurringId);
-         if (!exists) pendingRecurringTotal += r.amount;
-      }
+      const pendingOccurrences = db.prepare(`
+        SELECT SUM(amount_try) as total 
+        FROM recurring_payment_occurrences 
+        WHERE status IN ('pending', 'due', 'overdue')
+          AND due_date >= ? AND due_date <= ?
+      `).get(`${year}-${month}-01`, lastDayOfMonthStr) as any;
+      let pendingRecurringTotal = pendingOccurrences?.total || 0;
 
       const totalRevenue = revenueResult?.total || 0;
       const salesNetProfit = salesProfitResult?.total || 0;
@@ -1887,63 +1932,9 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Recurring Payments
-  app.get("/api/recurring-payments", (req, res) => {
-    const data = db.prepare("SELECT * FROM recurring_payments ORDER BY day_of_month ASC").all();
-    res.json(data);
-  });
+  // New recurring-payments routes will be imported here
+  app.use("/api/recurring-payments", createRecurringPaymentsRouter(db));
 
-  app.post("/api/recurring-payments", (req, res) => {
-    const { title, day_of_month, amount, category, note } = req.body;
-    const recId = uuidv4();
-    db.prepare(`
-      INSERT INTO recurring_payments (id, title, day_of_month, amount, category, note)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(recId, title, day_of_month, amount, category, note);
-    logActivity('CREATE', 'recurring_payment', recId, { 
-      before: {}, 
-      after: { title, day_of_month, amount, category, note } 
-    });
-    res.json({ success: true });
-  });
-
-  app.delete("/api/recurring-payments/:id", (req, res) => {
-    const beforeState = db.prepare("SELECT * FROM recurring_payments WHERE id = ?").get(req.params.id);
-    db.prepare("DELETE FROM recurring_payments WHERE id = ?").run(req.params.id);
-    logActivity('DELETE', 'recurring_payment', req.params.id, { before: beforeState, after: {} });
-    res.json({ success: true });
-  });
-
-  app.post("/api/recurring-payments/process", (req, res) => {
-    // Process payments for the current month that haven't been created yet
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = (now.getMonth() + 1).toString().padStart(2, '0');
-    
-    const activeTemplates = db.prepare("SELECT * FROM recurring_payments WHERE status = 'Active'").all() as any[];
-    
-    db.transaction(() => {
-      for (const t of activeTemplates) {
-        // Check if already exists for this month
-        const recurringId = `${t.id}-${year}-${month}`;
-        const existing = db.prepare("SELECT id FROM transactions WHERE recurring_id = ?").get(recurringId);
-        
-        if (!existing) {
-          // Determine the date (clamped to month length)
-          const lastDay = new Date(year, now.getMonth() + 1, 0).getDate();
-          const day = Math.min(t.day_of_month, lastDay);
-          const txDate = `${year}-${month}-${day.toString().padStart(2, '0')}`;
-
-          db.prepare(`
-            INSERT INTO transactions (id, date, type, category, platform, amount, note, recurring_id)
-            VALUES (?, ?, 'Expense', ?, 'Kasa', ?, ?, ?)
-          `).run(uuidv4(), txDate, t.category || 'Diğer', t.amount, t.title + (t.note ? ` - ${t.note}` : ''), recurringId);
-        }
-      }
-    })();
-    
-    res.json({ success: true });
-  });
 
   // Exchange Rates
   app.get("/api/exchange-rate", (req, res) => {
@@ -2880,6 +2871,7 @@ async function startServer() {
 
 
   app.use("/api/analytics", createProductAnalyticsRouter(db));
+  app.use("/api/dashboard", createDashboardDataRouter(db));
 
   // --- PUBLIC API ROUTES ---
   app.use("/api/public", publicAuthFailedLimiter, publicApiLimiter);
