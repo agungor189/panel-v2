@@ -20,6 +20,8 @@ import { createRecurringPaymentsRouter } from "./server/routes/recurringPayments
 import { createDashboardDataRouter } from "./server/routes/dashboardDataRoutes.js";
 import { generateNormalizedFields } from "./server/utils/normalizeProductFields.js";
 import { runMigrations } from "./server/migrations/runner.js";
+import { applySchema } from "./server/db/schema.js";
+import { applySeed } from "./server/db/seed.js";
 
 declare global {
   namespace Express {
@@ -100,562 +102,34 @@ db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 db.pragma("busy_timeout = 5000"); // wait up to 5s on locked DB instead of immediately throwing
 
-// Schema setup
-db.exec(`
-  CREATE TABLE IF NOT EXISTS products (
-    id TEXT PRIMARY KEY,
-    name TEXT,
-    title TEXT NOT NULL,
-    warehouse_location TEXT,
-    sku TEXT UNIQUE,
-    barcode TEXT,
-    category TEXT,
-    model TEXT,
-    description TEXT,
-    purchase_price_usd REAL DEFAULT 0,
-    purchase_cost REAL DEFAULT 0,
-    sale_price REAL DEFAULT 0,
-    buffer_percentage REAL DEFAULT 0,
-    profit_percentage REAL DEFAULT 0,
-    exchange_rate_used REAL DEFAULT 0,
-    price_locked BOOLEAN DEFAULT 0,
-    normalized_material TEXT,
-    normalized_model TEXT,
-    normalized_size TEXT,
-    normalized_tube_type TEXT,
-    status TEXT DEFAULT 'Active',
-    weight REAL DEFAULT 0,
-    notes TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+// Apply full schema (CREATE TABLE IF NOT EXISTS for all tables) then run
+// versioned migrations to bring existing databases up to date.
+// Seed default users / settings / accounts if tables are empty.
+applySchema(db);
+runMigrations(db);
 
-  -- Handle migrations for existing tables
-  PRAGMA foreign_keys=OFF;
-  BEGIN TRANSACTION;
-  
-  -- Add name if not exists
-  SELECT name FROM sqlite_master WHERE type='table' AND name='products' AND sql LIKE '%name TEXT%';
-  -- This is tricky in pure SQL without scripting if we want to be safe.
-  -- Simpler way: try to add and ignore error if already exists, but SQLite doesn't have IF NOT EXISTS for ADD COLUMN before 3.35.0
-  -- We'll just run it and catch error or check first.
-  COMMIT;
-  PRAGMA foreign_keys=ON;
-`);
-
+// Backfill normalized fields for existing products that were added before normalization was introduced.
 try {
-  db.exec("ALTER TABLE products ADD COLUMN purchase_price_usd REAL DEFAULT 0");
-} catch(e) {}
-try {
-  db.exec("ALTER TABLE products ADD COLUMN buffer_percentage REAL DEFAULT 0");
-} catch(e) {}
-try {
-  db.exec("ALTER TABLE products ADD COLUMN exchange_rate_used REAL DEFAULT 0");
-} catch(e) {}
-try {
-  db.exec("ALTER TABLE products ADD COLUMN profit_percentage REAL DEFAULT 0");
-} catch(e) {}
-try {
-  db.exec("ALTER TABLE products ADD COLUMN price_locked BOOLEAN DEFAULT 0");
-} catch(e) {}
-try {
-  db.exec("ALTER TABLE products ADD COLUMN weight REAL DEFAULT 0");
-} catch(e) {}
-try {
-  db.exec("ALTER TABLE products ADD COLUMN normalized_material TEXT");
-} catch(e) {}
-try {
-  db.exec("ALTER TABLE products ADD COLUMN normalized_model TEXT");
-} catch(e) {}
-try {
-  db.exec("ALTER TABLE products ADD COLUMN normalized_size TEXT");
-} catch(e) {}
-try { db.exec("ALTER TABLE products ADD COLUMN normalized_tube_type TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE products ADD COLUMN pipe_size TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE products ADD COLUMN normalized_pipe_size TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE api_keys ADD COLUMN deleted_at DATETIME DEFAULT NULL"); } catch(e) {}
-
-// Backfill pipe_size from size if available
-try {
-  db.exec(`UPDATE products SET pipe_size = size WHERE pipe_size IS NULL AND size IS NOT NULL`);
-} catch(e) {
-  console.error("Backfill pipe_size failed", e);
-}
-
-// Backfill normalized fields for existing products if they are null
-try {
-  const unnormalizedProducts = db.prepare("SELECT id, material, model, size, pipe_size, category, name FROM products WHERE normalized_material IS NULL OR normalized_pipe_size IS NULL").all();
+  const unnormalizedProducts = db.prepare(
+    "SELECT id, material, model, size, pipe_size, category, name FROM products WHERE normalized_material IS NULL OR normalized_pipe_size IS NULL"
+  ).all();
   if (unnormalizedProducts.length > 0) {
-    console.log(`Backfilling normalized fields for ${unnormalizedProducts.length} products...`);
-    const updateProduct = db.prepare("UPDATE products SET normalized_material=?, normalized_model=?, normalized_size=?, normalized_tube_type=?, normalized_pipe_size=? WHERE id=?");
+    const updateProduct = db.prepare(
+      "UPDATE products SET normalized_material=?, normalized_model=?, normalized_size=?, normalized_tube_type=?, normalized_pipe_size=? WHERE id=?"
+    );
     db.transaction(() => {
       for (const p of unnormalizedProducts) {
-        const { normalized_material, normalized_model, normalized_size, normalized_tube_type, normalized_pipe_size } = generateNormalizedFields(p);
-        updateProduct.run(normalized_material, normalized_model, normalized_size, normalized_tube_type, normalized_pipe_size, p.id);
+        const fields = generateNormalizedFields(p);
+        updateProduct.run(fields.normalized_material, fields.normalized_model, fields.normalized_size, fields.normalized_tube_type, fields.normalized_pipe_size, p.id);
       }
     })();
-    console.log("Backfill complete.");
+    console.log(`[Seed] Backfilled normalized fields for ${unnormalizedProducts.length} product(s).`);
   }
-} catch(e) {
-  console.error("Backfill failed", e);
-}
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS product_images (
-    id TEXT PRIMARY KEY,
-    product_id TEXT,
-    path TEXT,
-    sort_order INTEGER DEFAULT 0,
-    FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS product_platforms (
-    id TEXT PRIMARY KEY,
-    product_id TEXT,
-    platform_name TEXT,
-    stock INTEGER DEFAULT 0,
-    price REAL,
-    is_listed BOOLEAN DEFAULT 0,
-    FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS stock_movements (
-    id TEXT PRIMARY KEY,
-    product_id TEXT,
-    platform_name TEXT,
-    change_amount INTEGER,
-    reason TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS transactions (
-    id TEXT PRIMARY KEY,
-    date DATETIME DEFAULT CURRENT_TIMESTAMP,
-    type TEXT, -- Income / Expense
-    category TEXT,
-    platform TEXT,
-    amount REAL,
-    product_id TEXT,
-    note TEXT,
-    reference_number TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE SET NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS activity_logs (
-    id TEXT PRIMARY KEY,
-    action TEXT,
-    entity_type TEXT,
-    entity_id TEXT,
-    details TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS recurring_payment_plans (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    description TEXT,
-    category TEXT,
-    payment_type TEXT,
-    amount REAL,
-    currency TEXT,
-    amount_try REAL,
-    exchange_rate REAL,
-    due_day INTEGER,
-    due_month INTEGER,
-    start_month INTEGER,
-    week_day INTEGER,
-    custom_interval_days INTEGER,
-    frequency TEXT,
-    start_date TEXT,
-    end_date TEXT,
-    next_due_date TEXT,
-    last_processed_date TEXT,
-    auto_process BOOLEAN DEFAULT 0,
-    is_active BOOLEAN DEFAULT 1,
-    payment_account_id TEXT,
-    expense_category_id TEXT,
-    tax_type TEXT,
-    related_party TEXT,
-    document_required BOOLEAN DEFAULT 0,
-    notes TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS recurring_payment_occurrences (
-    id TEXT PRIMARY KEY,
-    recurring_payment_id TEXT,
-    due_date TEXT,
-    amount REAL,
-    currency TEXT,
-    exchange_rate REAL,
-    amount_try REAL,
-    status TEXT,
-    processed_at DATETIME,
-    expense_id TEXT,
-    transaction_id TEXT,
-    processed_by TEXT,
-    notes TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(recurring_payment_id, due_date)
-  );
-
-  CREATE TABLE IF NOT EXISTS api_keys (
-    id TEXT PRIMARY KEY,
-    service_name TEXT NOT NULL,
-    display_name TEXT NOT NULL,
-    key_name TEXT,
-    api_key_encrypted TEXT NOT NULL,
-    api_secret_encrypted TEXT,
-    merchant_id TEXT,
-    seller_id TEXT,
-    status TEXT DEFAULT 'active',
-    last4 TEXT,
-    notes TEXT,
-    last_used_at DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    deleted_at DATETIME DEFAULT NULL
-  );
-
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_unique_name ON api_keys(service_name, display_name) WHERE deleted_at IS NULL;
-
-  CREATE INDEX IF NOT EXISTS idx_transactions_type_date ON transactions(type, date);
-  CREATE INDEX IF NOT EXISTS idx_transactions_platform ON transactions(platform);
-  CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
-  CREATE INDEX IF NOT EXISTS idx_recurring_plans_status ON recurring_payment_plans(is_active);
-  CREATE INDEX IF NOT EXISTS idx_recurring_occurrences_status ON recurring_payment_occurrences(status);
-  CREATE INDEX IF NOT EXISTS idx_product_platforms_product_id ON product_platforms(product_id);
-  CREATE INDEX IF NOT EXISTS idx_product_images_product_id ON product_images(product_id);
-
-  CREATE TABLE IF NOT EXISTS panel_api_keys (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    key_prefix TEXT NOT NULL,
-    key_hash TEXT NOT NULL,
-    last4 TEXT NOT NULL,
-    status TEXT DEFAULT 'active',
-    environment TEXT DEFAULT 'test',
-    permissions TEXT NOT NULL,
-    allowed_ips TEXT,
-    expires_at DATETIME,
-    last_used_at DATETIME,
-    last_used_ip TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    revoked_at DATETIME,
-    deleted_at DATETIME
-  );
-
-  CREATE TABLE IF NOT EXISTS firms (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    sector TEXT,
-    city TEXT,
-    website TEXT,
-    phone TEXT,
-    email TEXT,
-    contact_person TEXT,
-    source_url TEXT,
-    related_product TEXT,
-    status TEXT DEFAULT 'Yeni',
-    notes TEXT,
-    is_active BOOLEAN DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS firm_notes (
-    id TEXT PRIMARY KEY,
-    firm_id TEXT,
-    note TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(firm_id) REFERENCES firms(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS offers (
-    id TEXT PRIMARY KEY,
-    firm_id TEXT,
-    title TEXT,
-    description TEXT,
-    amount REAL DEFAULT 0,
-    currency TEXT DEFAULT '₺',
-    status TEXT DEFAULT 'Taslak',
-    offer_date DATETIME,
-    valid_until DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(firm_id) REFERENCES firms(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS follow_ups (
-    id TEXT PRIMARY KEY,
-    firm_id TEXT,
-    type TEXT,
-    note TEXT,
-    next_follow_up_date DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(firm_id) REFERENCES firms(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS sales (
-    id TEXT PRIMARY KEY,
-    customer_name TEXT,
-    customer_phone TEXT,
-    customer_address TEXT,
-    shipping_company TEXT,
-    tracking_number TEXT,
-    total_weight REAL,
-    total_quantity INTEGER,
-    total_amount REAL,
-    status TEXT DEFAULT 'Hazırlanıyor',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS sale_items (
-    id TEXT PRIMARY KEY,
-    sale_id TEXT,
-    product_id TEXT,
-    product_name TEXT,
-    quantity INTEGER,
-    weight REAL,
-    FOREIGN KEY(sale_id) REFERENCES sales(id) ON DELETE CASCADE,
-    FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE SET NULL
-  );
-`);
-
-try {
-  db.exec("ALTER TABLE transactions ADD COLUMN recurring_id TEXT");
-} catch(e) {}
-
-try { db.exec("ALTER TABLE transactions ADD COLUMN title TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN description TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN payment_method TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN supplier TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN invoice_number TEXT"); } catch(e) {}
-
-try { db.exec("ALTER TABLE transactions ADD COLUMN expense_type TEXT"); } catch(e) {}
-
-try { db.exec("ALTER TABLE sales ADD COLUMN platform TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE sales ADD COLUMN commission_rate REAL DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE sales ADD COLUMN shipping_cost REAL DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE sales ADD COLUMN discount REAL DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE sales ADD COLUMN net_profit REAL DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE sales ADD COLUMN packaging_cost REAL DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE sales ADD COLUMN ad_spend REAL DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE sales ADD COLUMN other_expenses REAL DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE sales ADD COLUMN net_total REAL DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE sales ADD COLUMN gross_profit REAL DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE products ADD COLUMN material TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE products ADD COLUMN size TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE products ADD COLUMN connection_type TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE products ADD COLUMN usage_area TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE recurring_payment_plans ADD COLUMN start_month INTEGER"); } catch(e) {}
-try { db.exec("ALTER TABLE recurring_payment_plans ADD COLUMN week_day INTEGER"); } catch(e) {}
-try { db.exec("ALTER TABLE recurring_payment_plans ADD COLUMN custom_interval_days INTEGER"); } catch(e) {}
-try { db.exec("ALTER TABLE products ADD COLUMN supplier TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE products ADD COLUMN min_stock_level INTEGER DEFAULT 50"); } catch(e) {}
-try { db.exec("UPDATE products SET min_stock_level = 50 WHERE min_stock_level = 5 OR min_stock_level = 0 OR min_stock_level IS NULL"); } catch(e) {}
-
-try { db.exec("ALTER TABLE sale_items ADD COLUMN unit_price REAL DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE sale_items ADD COLUMN purchase_cost REAL DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE sale_items ADD COLUMN net_profit REAL DEFAULT 0"); } catch(e) {}
-
-try { db.exec("ALTER TABLE transactions ADD COLUMN payer_person_id TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN will_be_refunded INTEGER DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN refund_status TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN is_invoice INTEGER DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN invoice_name TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN is_stock_related INTEGER DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN distribute_to_product_cost INTEGER DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN document_url TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN currency TEXT DEFAULT 'TRY'"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN amount_try REAL DEFAULT 0"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN is_deleted INTEGER DEFAULT 0"); } catch(e) {}
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS expense_attachments (
-    id TEXT PRIMARY KEY,
-    expense_id TEXT,
-    file_name TEXT,
-    file_path TEXT,
-    mime_type TEXT,
-    file_size INTEGER,
-    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(expense_id) REFERENCES transactions(id) ON DELETE CASCADE
-  );
-`);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS cash_accounts (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    currency TEXT DEFAULT 'TRY',
-    type TEXT,
-    opening_balance REAL DEFAULT 0,
-    is_active INTEGER DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-`);
-
-// Idempotent migration for cash_accounts
-try {
-  const accountCols = db.prepare("PRAGMA table_info(cash_accounts)").all() as any[];
-  const cols = accountCols.map(c => c.name);
-  
-  if (!cols.includes('credit_limit')) db.exec("ALTER TABLE cash_accounts ADD COLUMN credit_limit REAL DEFAULT 0");
-  if (!cols.includes('cutoff_day')) db.exec("ALTER TABLE cash_accounts ADD COLUMN cutoff_day INTEGER");
-  if (!cols.includes('payment_due_day')) db.exec("ALTER TABLE cash_accounts ADD COLUMN payment_due_day INTEGER");
-  if (!cols.includes('is_liability')) db.exec("ALTER TABLE cash_accounts ADD COLUMN is_liability INTEGER DEFAULT 0");
-
-  // New features requested
-  if (!cols.includes('statement_day')) db.exec("ALTER TABLE cash_accounts ADD COLUMN statement_day INTEGER");
-  if (!cols.includes('due_day')) db.exec("ALTER TABLE cash_accounts ADD COLUMN due_day INTEGER");
-  if (!cols.includes('bank_name')) db.exec("ALTER TABLE cash_accounts ADD COLUMN bank_name TEXT");
-  if (!cols.includes('card_last_four')) db.exec("ALTER TABLE cash_accounts ADD COLUMN card_last_four TEXT");
-  if (!cols.includes('current_debt')) db.exec("ALTER TABLE cash_accounts ADD COLUMN current_debt REAL DEFAULT 0");
-  if (!cols.includes('available_limit')) db.exec("ALTER TABLE cash_accounts ADD COLUMN available_limit REAL DEFAULT 0");
 } catch (e) {
-  console.error("Migration error for cash_accounts:", e);
+  console.error("[Seed] Normalized field backfill failed:", e);
 }
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS cash_transactions (
-    id TEXT PRIMARY KEY,
-    account_id TEXT,
-    type TEXT,
-    amount REAL,
-    currency TEXT,
-    exchange_rate_at_transaction REAL,
-    source_type TEXT,
-    source_id TEXT,
-    description TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(account_id) REFERENCES cash_accounts(id)
-  );
-`);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS exchange_rates (
-    id TEXT PRIMARY KEY,
-    base_currency TEXT NOT NULL,
-    target_currency TEXT NOT NULL,
-    rate REAL NOT NULL,
-    source TEXT,
-    fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    is_active INTEGER DEFAULT 1
-  );
-`);
-
-db.exec(`DROP TABLE IF EXISTS dashboard_widgets;`);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS dashboard_widgets (
-    id TEXT PRIMARY KEY,
-    user_id TEXT DEFAULT 'admin',
-    widget_key TEXT NOT NULL,
-    title TEXT,
-    description TEXT,
-    widget_type TEXT NOT NULL,
-    source_module TEXT,
-    size TEXT DEFAULT 'small',
-    position INTEGER DEFAULT 0,
-    is_visible INTEGER DEFAULT 1,
-    settings_json TEXT DEFAULT '{}',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    username TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    role TEXT DEFAULT 'user',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-`);
-
-const countUsers = db.prepare("SELECT COUNT(*) as count FROM users").get() as any;
-if (countUsers.count === 0) {
-  const hash = bcrypt.hashSync('admin', 10);
-  db.prepare("INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)").run(uuidv4(), 'admin', hash, 'admin');
-}
-
-const widgetsCount = db.prepare("SELECT COUNT(*) as count FROM dashboard_widgets").get() as any;
-if (widgetsCount.count === 0) {
-  const insertWidget = db.prepare("INSERT INTO dashboard_widgets (id, user_id, widget_key, title, description, widget_type, source_module, size, position, is_visible, settings_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-  
-  const defaults = [
-    { key: 'payment_month_pending_count', title: 'Bu Ay Bekleyen İşlem', type: 'kpi', module: 'payments', size: 'small' },
-    { key: 'payment_month_pending_amount', title: 'Bu Ay Bekleyen Tutar', type: 'kpi', module: 'payments', size: 'small' },
-    { key: 'payment_overdue_count', title: 'Geciken Ödeme', type: 'kpi', module: 'payments', size: 'small' },
-    { key: 'product_total_sold', title: 'Toplam Satılan Adet', type: 'kpi', module: 'products', size: 'small' },
-    { key: 'product_total_revenue', title: 'Toplam Satış Geliri', type: 'kpi', module: 'products', size: 'small' },
-    { key: 'product_top_material', title: 'En Çok Satan Materyal', type: 'kpi', module: 'products', size: 'small' },
-    { key: 'product_material_pie', title: 'Materyal Satış Dağılımı', type: 'pie', module: 'products', size: 'medium' },
-    { key: 'sales_revenue_trend', title: 'Satış Trend Grafiği', type: 'line', module: 'products', size: 'large' },
-    { key: 'product_reorder_summar', title: 'Akıllı Sipariş Önerisi', type: 'kpi', module: 'products', size: 'medium' },
-    { key: 'payment_upcoming_list', title: 'Yaklaşan Ödemeler', type: 'list', module: 'payments', size: 'medium' }
-  ];
-
-  defaults.forEach((w, i) => {
-    insertWidget.run(uuidv4(), 'admin', w.key, w.title, '', w.type, w.module, w.size, i, 1, '{}');
-  });
-}
-
-try { db.exec("ALTER TABLE sales ADD COLUMN exchange_rate_at_transaction REAL DEFAULT 1"); } catch(e) {}
-try { db.exec("ALTER TABLE transactions ADD COLUMN exchange_rate_at_transaction REAL DEFAULT 1"); } catch(e) {}
-
-// Default settings
-try { db.exec("ALTER TABLE transactions ADD COLUMN cash_account_id TEXT"); } catch(e) {}
-try { db.exec("ALTER TABLE sales ADD COLUMN cash_account_id TEXT"); } catch(e) {}
-
-// Seed default cash accounts if empty
-const accountsCount = db.prepare("SELECT COUNT(*) as count FROM cash_accounts").get() as any;
-if (accountsCount.count === 0) {
-  const insertAccount = db.prepare("INSERT INTO cash_accounts (id, name, currency, type) VALUES (?, ?, ?, ?)");
-  insertAccount.run(uuidv4(), "Nakit TL", "TRY", "cash");
-  insertAccount.run(uuidv4(), "Banka TL", "TRY", "bank");
-  insertAccount.run(uuidv4(), "USD Kasa", "USD", "cash");
-  insertAccount.run(uuidv4(), "Trendyol Bekleyen", "TRY", "platform");
-  insertAccount.run(uuidv4(), "Hepsiburada Bekleyen", "TRY", "platform");
-  insertAccount.run(uuidv4(), "Amazon Bekleyen", "TRY", "platform");
-}
-
-// Default settings
-const insertSetting = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
-insertSetting.run("company_name", "DSDST Panel");
-insertSetting.run("low_stock_threshold", "50");
-db.prepare("UPDATE settings SET value = '50' WHERE key = 'low_stock_threshold'").run(); // force update from user request
-insertSetting.run("currency_symbol", "₺");
-insertSetting.run("language", "tr");
-insertSetting.run("usd_exchange_rate", "32.5");
-insertSetting.run("default_buffer_percentage", "20");
-insertSetting.run("default_profit_percentage", "30");
-insertSetting.run("api_key", uuidv4());
-insertSetting.run("commission_rates", JSON.stringify({
-  "Trendyol": 15,
-  "Hepsiburada": 15,
-  "Amazon": 10,
-  "N11": 15,
-  "Website": 2,
-  "Instagram": 0
-}));
-insertSetting.run("product_categories", JSON.stringify(["Aliminyum", "PPR", "Dokum Demir", "Karbon Celik"]));
-insertSetting.run("income_categories", JSON.stringify(["Satış", "İade", "Hizmet Bedeli", "Diğer"]));
-insertSetting.run("expense_categories", JSON.stringify(["Kargo", "Komisyon", "Maliyet", "Reklam", "Vergi", "Diğer"]));
-
-// Run versioned migrations after base schema is established.
-// This is the single source of truth for incremental schema changes.
-runMigrations(db);
+applySeed(db);
 
 // Multer setup for image uploads
 const storage = multer.diskStorage({
@@ -851,18 +325,80 @@ async function startServer() {
   const authRouter = express.Router();
   authRouter.post('/login', (req, res) => {
     try {
-       const { username, password } = req.body;
-       const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username) as any;
-       if (!user) return res.status(401).json({ success: false, error: { code: 'AUTH_FAILED', message: 'Geçersiz kullanıcı adı veya şifre' } });
-       
-       const valid = bcrypt.compareSync(password, user.password_hash);
-       if (!valid) return res.status(401).json({ success: false, error: { code: 'AUTH_FAILED', message: 'Geçersiz kullanıcı adı veya şifre' } });
-       
-       const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '12h' });
-       res.json({ success: true, token, user: { id: user.id, username: user.username, role: user.role } });
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Kullanıcı adı ve şifre zorunludur.' } });
+      }
+
+      const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username) as any;
+      if (!user) {
+        logActivity('LOGIN_FAILED', 'auth', 'unknown', { username, ip: req.ip, reason: 'user_not_found' });
+        return res.status(401).json({ success: false, error: { code: 'AUTH_FAILED', message: 'Geçersiz kullanıcı adı veya şifre.' } });
+      }
+
+      if (user.is_active === 0) {
+        return res.status(403).json({ success: false, error: { code: 'ACCOUNT_DISABLED', message: 'Bu hesap devre dışı bırakılmış.' } });
+      }
+
+      const valid = bcrypt.compareSync(password, user.password_hash);
+      if (!valid) {
+        logActivity('LOGIN_FAILED', 'auth', user.id, { username, ip: req.ip, reason: 'wrong_password' });
+        return res.status(401).json({ success: false, error: { code: 'AUTH_FAILED', message: 'Geçersiz kullanıcı adı veya şifre.' } });
+      }
+
+      db.prepare("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?").run(user.id);
+      logActivity('LOGIN_SUCCESS', 'auth', user.id, { username, ip: req.ip }, user.id);
+
+      const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '12h' });
+      res.json({
+        success: true,
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          must_change_password: user.must_change_password === 1,
+        },
+      });
     } catch (err: any) {
-       AppLogger.error('AUTH_ERROR', 'Login failed', err);
-       res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } });
+      AppLogger.error('AUTH_ERROR', 'Login failed', err);
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } });
+    }
+  });
+
+  // Change own password — requires current password verification.
+  // Also used for forced password change after first login.
+  authRouter.post('/change-password', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Token gerekli.' } });
+    }
+    try {
+      const decoded = jwt.verify(authHeader.split(' ')[1], JWT_SECRET) as any;
+      const { current_password, new_password } = req.body;
+
+      if (!current_password || !new_password) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Mevcut ve yeni şifre zorunludur.' } });
+      }
+      if (new_password.length < 8) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Yeni şifre en az 8 karakter olmalıdır.' } });
+      }
+
+      const user = db.prepare("SELECT * FROM users WHERE id = ?").get(decoded.id) as any;
+      if (!user) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Kullanıcı bulunamadı.' } });
+
+      if (!bcrypt.compareSync(current_password, user.password_hash)) {
+        return res.status(401).json({ success: false, error: { code: 'AUTH_FAILED', message: 'Mevcut şifre yanlış.' } });
+      }
+
+      const newHash = bcrypt.hashSync(new_password, 10);
+      db.prepare("UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .run(newHash, user.id);
+
+      logActivity('PASSWORD_CHANGED', 'auth', user.id, { ip: req.ip }, user.id);
+      res.json({ success: true, message: 'Şifre başarıyla değiştirildi.' });
+    } catch (err: any) {
+      res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Geçersiz token.' } });
     }
   });
 

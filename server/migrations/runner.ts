@@ -125,6 +125,140 @@ const migrations: Migration[] = [
       try { db.exec("ALTER TABLE sale_items ADD COLUMN shipping_share REAL DEFAULT 0"); } catch (_) {}
     },
   },
+  {
+    version: 12,
+    name: "legacy_products_columns",
+    up(db) {
+      // Columns that were previously added via unversioned try/catch blocks in server.ts.
+      // Safe to re-run: each statement is wrapped in try/catch.
+      const cols = [
+        "ALTER TABLE products ADD COLUMN purchase_price_usd REAL DEFAULT 0",
+        "ALTER TABLE products ADD COLUMN buffer_percentage REAL DEFAULT 0",
+        "ALTER TABLE products ADD COLUMN exchange_rate_used REAL DEFAULT 0",
+        "ALTER TABLE products ADD COLUMN profit_percentage REAL DEFAULT 0",
+        "ALTER TABLE products ADD COLUMN price_locked INTEGER DEFAULT 0",
+        "ALTER TABLE products ADD COLUMN weight REAL DEFAULT 0",
+        "ALTER TABLE products ADD COLUMN normalized_material TEXT",
+        "ALTER TABLE products ADD COLUMN normalized_model TEXT",
+        "ALTER TABLE products ADD COLUMN normalized_size TEXT",
+        "ALTER TABLE products ADD COLUMN normalized_tube_type TEXT",
+        "ALTER TABLE products ADD COLUMN pipe_size TEXT",
+        "ALTER TABLE products ADD COLUMN normalized_pipe_size TEXT",
+        "ALTER TABLE products ADD COLUMN material TEXT",
+        "ALTER TABLE products ADD COLUMN size TEXT",
+        "ALTER TABLE products ADD COLUMN connection_type TEXT",
+        "ALTER TABLE products ADD COLUMN usage_area TEXT",
+        "ALTER TABLE products ADD COLUMN supplier TEXT",
+        "ALTER TABLE products ADD COLUMN min_stock_level INTEGER DEFAULT 50",
+      ];
+      for (const sql of cols) { try { db.exec(sql); } catch (_) {} }
+      // Backfill min_stock_level
+      try { db.exec("UPDATE products SET min_stock_level = 50 WHERE min_stock_level IS NULL OR min_stock_level < 1"); } catch (_) {}
+      // Backfill pipe_size from size
+      try { db.exec("UPDATE products SET pipe_size = size WHERE pipe_size IS NULL AND size IS NOT NULL"); } catch (_) {}
+    },
+  },
+  {
+    version: 13,
+    name: "legacy_transactions_columns",
+    up(db) {
+      const cols = [
+        "ALTER TABLE transactions ADD COLUMN recurring_id TEXT",
+        "ALTER TABLE transactions ADD COLUMN title TEXT",
+        "ALTER TABLE transactions ADD COLUMN description TEXT",
+        "ALTER TABLE transactions ADD COLUMN payment_method TEXT",
+        "ALTER TABLE transactions ADD COLUMN supplier TEXT",
+        "ALTER TABLE transactions ADD COLUMN invoice_number TEXT",
+        "ALTER TABLE transactions ADD COLUMN expense_type TEXT",
+        "ALTER TABLE transactions ADD COLUMN payer_person_id TEXT",
+        "ALTER TABLE transactions ADD COLUMN will_be_refunded INTEGER DEFAULT 0",
+        "ALTER TABLE transactions ADD COLUMN refund_status TEXT",
+        "ALTER TABLE transactions ADD COLUMN is_invoice INTEGER DEFAULT 0",
+        "ALTER TABLE transactions ADD COLUMN invoice_name TEXT",
+        "ALTER TABLE transactions ADD COLUMN is_stock_related INTEGER DEFAULT 0",
+        "ALTER TABLE transactions ADD COLUMN distribute_to_product_cost INTEGER DEFAULT 0",
+        "ALTER TABLE transactions ADD COLUMN document_url TEXT",
+        "ALTER TABLE transactions ADD COLUMN currency TEXT DEFAULT 'TRY'",
+        "ALTER TABLE transactions ADD COLUMN amount_try REAL DEFAULT 0",
+        "ALTER TABLE transactions ADD COLUMN is_deleted INTEGER DEFAULT 0",
+        "ALTER TABLE transactions ADD COLUMN exchange_rate_at_transaction REAL DEFAULT 1",
+        "ALTER TABLE transactions ADD COLUMN cash_account_id TEXT",
+      ];
+      for (const sql of cols) { try { db.exec(sql); } catch (_) {} }
+    },
+  },
+  {
+    version: 14,
+    name: "legacy_sales_columns",
+    up(db) {
+      const cols = [
+        "ALTER TABLE sales ADD COLUMN platform TEXT",
+        "ALTER TABLE sales ADD COLUMN commission_rate REAL DEFAULT 0",
+        "ALTER TABLE sales ADD COLUMN shipping_cost REAL DEFAULT 0",
+        "ALTER TABLE sales ADD COLUMN discount REAL DEFAULT 0",
+        "ALTER TABLE sales ADD COLUMN net_profit REAL DEFAULT 0",
+        "ALTER TABLE sales ADD COLUMN packaging_cost REAL DEFAULT 0",
+        "ALTER TABLE sales ADD COLUMN ad_spend REAL DEFAULT 0",
+        "ALTER TABLE sales ADD COLUMN other_expenses REAL DEFAULT 0",
+        "ALTER TABLE sales ADD COLUMN net_total REAL DEFAULT 0",
+        "ALTER TABLE sales ADD COLUMN gross_profit REAL DEFAULT 0",
+        "ALTER TABLE sales ADD COLUMN exchange_rate_at_transaction REAL DEFAULT 1",
+        "ALTER TABLE sales ADD COLUMN cash_account_id TEXT",
+      ];
+      for (const sql of cols) { try { db.exec(sql); } catch (_) {} }
+    },
+  },
+  {
+    version: 15,
+    name: "legacy_sale_items_columns",
+    up(db) {
+      const cols = [
+        "ALTER TABLE sale_items ADD COLUMN unit_price REAL DEFAULT 0",
+        "ALTER TABLE sale_items ADD COLUMN purchase_cost REAL DEFAULT 0",
+        "ALTER TABLE sale_items ADD COLUMN net_profit REAL DEFAULT 0",
+      ];
+      for (const sql of cols) { try { db.exec(sql); } catch (_) {} }
+    },
+  },
+  {
+    version: 16,
+    name: "legacy_misc_columns",
+    up(db) {
+      const cols = [
+        "ALTER TABLE api_keys ADD COLUMN deleted_at DATETIME DEFAULT NULL",
+        "ALTER TABLE recurring_payment_plans ADD COLUMN start_month INTEGER",
+        "ALTER TABLE recurring_payment_plans ADD COLUMN week_day INTEGER",
+        "ALTER TABLE recurring_payment_plans ADD COLUMN custom_interval_days INTEGER",
+      ];
+      for (const sql of cols) { try { db.exec(sql); } catch (_) {} }
+    },
+  },
+  {
+    version: 17,
+    name: "legacy_cash_accounts_columns",
+    up(db) {
+      const cols = [
+        "ALTER TABLE cash_accounts ADD COLUMN credit_limit REAL DEFAULT 0",
+        "ALTER TABLE cash_accounts ADD COLUMN cutoff_day INTEGER",
+        "ALTER TABLE cash_accounts ADD COLUMN payment_due_day INTEGER",
+        "ALTER TABLE cash_accounts ADD COLUMN is_liability INTEGER DEFAULT 0",
+        "ALTER TABLE cash_accounts ADD COLUMN statement_day INTEGER",
+        "ALTER TABLE cash_accounts ADD COLUMN due_day INTEGER",
+        "ALTER TABLE cash_accounts ADD COLUMN bank_name TEXT",
+        "ALTER TABLE cash_accounts ADD COLUMN card_last_four TEXT",
+        "ALTER TABLE cash_accounts ADD COLUMN current_debt REAL DEFAULT 0",
+        "ALTER TABLE cash_accounts ADD COLUMN available_limit REAL DEFAULT 0",
+      ];
+      for (const sql of cols) { try { db.exec(sql); } catch (_) {} }
+    },
+  },
+  {
+    version: 18,
+    name: "add_must_change_password_to_users",
+    up(db) {
+      try { db.exec("ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0"); } catch (_) {}
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

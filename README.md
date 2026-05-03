@@ -60,7 +60,7 @@ npm run dev        # Vite + Express birlikte localhost:3000
 | `JWT_SECRET` | ✅ | JWT imzalama anahtarı (min 32 karakter) |
 | `ENCRYPTION_SECRET` | ✅ | API anahtarlarını şifrelemek için AES-256 anahtarı |
 | `PANEL_API_HASH_SECRET` | ✅ | Panel API anahtarlarını hash'lemek için HMAC anahtarı |
-| `DB_PATH` | — | SQLite dosya yolu. Default: `<proje-kök>/dsdst_panel.db`. Docker'da `/data/dsdst_panel.db` kullan |
+| `DB_PATH` | — | SQLite dosya yolu. **Docker'da mutlaka set et:** `DB_PATH=/data/dsdst_panel.db` (volume'a bağlı). Set edilmezse proje dizinine yazar — Docker container yeniden başlatıldığında veri kaybolur. |
 | `APP_URL` | — | Uygulamanın dışarıdan erişilen URL'i |
 | `ALLOWED_ORIGINS` | — | İzin verilen CORS origin'leri (virgülle ayrılmış). Boş bırakılırsa hepsi izinli |
 | `GEMINI_API_KEY` | — | Google Gemini AI entegrasyonu için |
