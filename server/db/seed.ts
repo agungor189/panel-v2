@@ -11,7 +11,7 @@ const DEFAULT_WIDGETS = [
   { key: "product_top_material",         title: "En Çok Satan Materyal",   type: "kpi",  module: "products",  size: "small"  },
   { key: "product_material_pie",         title: "Materyal Satış Dağılımı", type: "pie",  module: "products",  size: "medium" },
   { key: "sales_revenue_trend",          title: "Satış Trend Grafiği",     type: "line", module: "products",  size: "large"  },
-  { key: "product_reorder_summar",       title: "Akıllı Sipariş Önerisi",  type: "kpi",  module: "products",  size: "medium" },
+  { key: "product_reorder_summary",      title: "Akıllı Sipariş Önerisi",  type: "kpi",  module: "products",  size: "medium" },
   { key: "payment_upcoming_list",        title: "Yaklaşan Ödemeler",       type: "list", module: "payments",  size: "medium" },
 ];
 

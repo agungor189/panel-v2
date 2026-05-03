@@ -259,6 +259,19 @@ const migrations: Migration[] = [
       try { db.exec("ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0"); } catch (_) {}
     },
   },
+  {
+    version: 19,
+    name: "fix_widget_key_typo",
+    up(db) {
+      // Frontend looks for "product_reorder_summary" but seed had "product_reorder_summar"
+      // — widget never rendered. Fix existing rows.
+      try {
+        db.prepare(
+          "UPDATE dashboard_widgets SET widget_key = 'product_reorder_summary' WHERE widget_key = 'product_reorder_summar'"
+        ).run();
+      } catch (_) {}
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

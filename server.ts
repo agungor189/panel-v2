@@ -44,21 +44,36 @@ const ALGORITHM = 'aes-256-gcm';
 if (!process.env.ENCRYPTION_SECRET) {
   throw new Error("ENCRYPTION_SECRET is required. Lütfen .env dosyanıza ekleyin!");
 }
+if (process.env.ENCRYPTION_SECRET.length < 32) {
+  throw new Error(
+    "ENCRYPTION_SECRET en az 32 karakter olmalıdır. Üret: " +
+    "node -e \"console.log(require('crypto').randomBytes(48).toString('hex'))\""
+  );
+}
 
 if (!process.env.PANEL_API_HASH_SECRET) {
   throw new Error("PANEL_API_HASH_SECRET is required. Lütfen .env dosyanıza ekleyin!");
+}
+if (process.env.PANEL_API_HASH_SECRET.length < 32) {
+  throw new Error("PANEL_API_HASH_SECRET en az 32 karakter olmalıdır.");
 }
 
 if (!process.env.JWT_SECRET) {
   throw new Error("JWT_SECRET is required. Lütfen .env dosyanıza ekleyin! (min 32 karakter önerilir)");
 }
+if (process.env.JWT_SECRET.length < 32) {
+  throw new Error("JWT_SECRET en az 32 karakter olmalıdır.");
+}
 
-const ENCRYPTION_SECRET = process.env.ENCRYPTION_SECRET.padEnd(32, '0').slice(0, 32);
+// AES-256 needs exactly 32 bytes. The min-length check above guarantees we
+// have enough material; we use the first 32 bytes as the key. Backwards-
+// compatible with previously encrypted data.
+const ENCRYPTION_SECRET = Buffer.from(process.env.ENCRYPTION_SECRET.slice(0, 32));
 
 function encryptText(text: string): string {
   if (!text) return '';
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(ENCRYPTION_SECRET), iv);
+  const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_SECRET, iv);
   const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
   const authTag = cipher.getAuthTag();
   return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted.toString('hex')}`;
@@ -72,7 +87,7 @@ function decryptText(cipherText: string): string {
     const iv = Buffer.from(ivHex, 'hex');
     const authTag = Buffer.from(authTagHex, 'hex');
     const encrypted = Buffer.from(encryptedHex, 'hex');
-    const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(ENCRYPTION_SECRET), iv);
+    const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_SECRET, iv);
     decipher.setAuthTag(authTag);
     const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
     return decrypted.toString('utf8');
@@ -417,6 +432,18 @@ async function startServer() {
        res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid token' } });
      }
   });
+
+  // Strict rate-limit on login — brute-force protection.
+  // 10 attempts per 15 min per IP, only failed attempts count toward the limit.
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    message: { success: false, error: { code: 'TOO_MANY_REQUESTS', message: 'Çok fazla başarısız giriş denemesi. 15 dakika sonra tekrar deneyin.' } },
+  });
+  app.use("/api/auth/login", loginLimiter);
 
   app.use("/api/auth", authRouter);
 
@@ -2813,7 +2840,21 @@ async function startServer() {
 
       logActivity("DB_RESTORED", "system", "system", { restoredBy: (req as any).user?.username, ip: req.ip }, (req as any).user?.id);
 
-      res.json({ success: true, message: "Yedek başarıyla geri yüklendi. Sayfa yenilenebilir." });
+      // Restore done. Imported routers (analytics, dashboard, recurring) hold a
+      // reference to the OLD db object captured at startup. Rather than rewiring
+      // every router to use a getter, exit the process — Docker / systemd / PM2
+      // will restart it cleanly with the fresh DB. The client should redirect
+      // to login after a few seconds.
+      res.json({
+        success: true,
+        message: "Yedek başarıyla geri yüklendi. Sunucu 3 saniye içinde yeniden başlatılacak.",
+        restart_in_seconds: 3,
+      });
+      setTimeout(() => {
+        AppLogger.info('SYSTEM', 'Exiting after backup restore — process manager will restart');
+        process.exit(0);
+      }, 3000);
+      return;
     } catch (err: any) {
       AppLogger.error('RESTORE_ERROR', 'Backup restore failed', err);
       res.status(500).json({ success: false, error: { code: 'RESTORE_FAILED', message: err.message } });
